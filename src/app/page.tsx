@@ -45,14 +45,17 @@ export default function Home() {
     async function initAI() {
       if (typeof window === 'undefined') return;
 
-      if (!navigator.gpu) {
+      // Fix for TypeScript: Cast navigator as any to allow reading WebGPU
+      const nav = navigator as any;
+
+      if (!nav.gpu) {
         setWebGpuAvailable(false);
         setLoadingProgress('WebGPU not supported on this device/browser. Using fast regex rules.');
         return;
       }
 
       try {
-        const adapter = await navigator.gpu.requestAdapter();
+        const adapter = await nav.gpu.requestAdapter();
         if (!adapter) {
           setWebGpuAvailable(false);
           setLoadingProgress('WebGPU adapter unavailable. Using fast regex rules.');
@@ -118,7 +121,6 @@ export default function Home() {
 
     try {
       if (engine && isModelReady) {
-        // Run locally via WebLLM
         const response = await engine.chat.completions.create({
           messages: [
             { role: 'system', content: SYSTEM_PROMPT },
@@ -141,7 +143,6 @@ export default function Home() {
             },
           ]);
         } catch {
-          // JSON parse failed on LLM output, use fallback
           const fallback = fallbackParse(userText);
           setMessages((prev) => [
             ...prev,
@@ -153,7 +154,6 @@ export default function Home() {
           ]);
         }
       } else {
-        // Instant Fallback Engine (0ms latency)
         const fallback = fallbackParse(userText);
         setMessages((prev) => [
           ...prev,
@@ -218,7 +218,7 @@ export default function Home() {
               {m.content}
             </div>
 
-            {/* Spotify Action Tag Debugger */}
+            {/* Action Tag Debugger */}
             {m.intent && (
               <div className="mt-1.5 text-[11px] font-mono bg-black/50 border border-gray-800 text-green-400 px-2 py-0.5 rounded">
                 ⚡ Action: <strong>{m.intent.action}</strong>
