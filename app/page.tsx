@@ -14,6 +14,14 @@ import {
   Music2,
   Check,
   Disc3,
+  Volume2,
+  Radio,
+  Sliders,
+  Smartphone,
+  Flame,
+  Moon,
+  Coffee,
+  HelpCircle,
 } from 'lucide-react';
 import { getAccessToken, spotifyFetch, redirectToSpotifyAuth } from '@/lib/spotify';
 import { askGemini, ChatMessage } from '@/lib/gemini';
@@ -35,13 +43,16 @@ export default function HomePage() {
     album: string;
     albumArt: string;
     isPlaying: boolean;
+    progressMs: number;
+    durationMs: number;
+    device?: string;
   } | null>(null);
 
   // Chat State
   const [messages, setMessages] = useState<ChatMessage[]>([
     {
       role: 'model',
-      text: 'Hey! Connect your Google Gemini key below and we can chat about what you are listening to, or tell me to switch up the music.',
+      text: 'Yo! I’m your TrackDeck co-pilot. Connect your free Gemini key and we can talk music theory, decode samples, or switch up the vibe.',
     },
   ]);
   const [chatInput, setChatInput] = useState('');
@@ -49,13 +60,16 @@ export default function HomePage() {
 
   const chatBottomRef = useRef<HTMLDivElement>(null);
 
-  // Initial load checks
+  // Initial load
   useEffect(() => {
     const savedGeminiKey = localStorage.getItem('gemini_api_key') || '';
     setGeminiKey(savedGeminiKey);
     setKeyInput(savedGeminiKey);
 
-    const savedClientId = localStorage.getItem('spotify_client_id') || process.env.NEXT_PUBLIC_SPOTIFY_CLIENT_ID || '';
+    const savedClientId =
+      localStorage.getItem('spotify_client_id') ||
+      process.env.NEXT_PUBLIC_SPOTIFY_CLIENT_ID ||
+      '';
     setSpotifyClientId(savedClientId);
 
     getAccessToken().then((token) => {
@@ -69,10 +83,10 @@ export default function HomePage() {
     });
   }, []);
 
-  // Poll Spotify playback every 4 seconds
+  // Poll Spotify playback every 3 seconds
   useEffect(() => {
     if (!isAuthenticated) return;
-    const interval = setInterval(fetchNowPlaying, 4000);
+    const interval = setInterval(fetchNowPlaying, 3000);
     return () => clearInterval(interval);
   }, [isAuthenticated]);
 
@@ -82,7 +96,7 @@ export default function HomePage() {
 
   async function fetchNowPlaying() {
     try {
-      const data = await spotifyFetch('/me/player/currently-playing');
+      const data = await spotifyFetch('/me/player');
       if (data && data.item) {
         setPlayback({
           name: data.item.name,
@@ -90,6 +104,9 @@ export default function HomePage() {
           album: data.item.album.name,
           albumArt: data.item.album.images?.[0]?.url || '',
           isPlaying: data.is_playing,
+          progressMs: data.progress_ms || 0,
+          durationMs: data.item.duration_ms || 1,
+          device: data.device?.name || 'Active Device',
         });
       } else {
         setPlayback(null);
@@ -113,12 +130,12 @@ export default function HomePage() {
 
   async function handleNext() {
     await spotifyFetch('/me/player/next', { method: 'POST' });
-    setTimeout(fetchNowPlaying, 600);
+    setTimeout(fetchNowPlaying, 500);
   }
 
   async function handlePrev() {
     await spotifyFetch('/me/player/previous', { method: 'POST' });
-    setTimeout(fetchNowPlaying, 600);
+    setTimeout(fetchNowPlaying, 500);
   }
 
   function handleLogout() {
@@ -129,7 +146,6 @@ export default function HomePage() {
     setShowSpotifyModal(true);
   }
 
-  // Gemini Key Save
   function saveGeminiKey() {
     if (!keyInput.trim()) return;
     localStorage.setItem('gemini_api_key', keyInput.trim());
@@ -139,36 +155,34 @@ export default function HomePage() {
       ...prev,
       {
         role: 'model',
-        text: '✨ Gemini Copilot is connected! Ask me about this track, artist trivia, or tell me what vibe you want next.',
+        text: '✨ Gemini Copilot is active! Ask me anything about your music or click a vibe chip below.',
       },
     ]);
   }
 
   // Chat Execution
-  async function handleSendMessage(e: React.FormEvent) {
-    e.preventDefault();
-    if (!chatInput.trim() || isAiLoading) return;
+  async function sendToGemini(textToSend: string) {
+    if (!textToSend.trim() || isAiLoading) return;
 
     if (!geminiKey) {
       setShowGeminiModal(true);
       return;
     }
 
-    const text = chatInput.trim();
-    setChatInput('');
-    setMessages((prev) => [...prev, { role: 'user', text }]);
+    setMessages((prev) => [...prev, { role: 'user', text: textToSend }]);
     setIsAiLoading(true);
 
     try {
-      const response = await askGemini(text, messages, geminiKey, playback);
+      const response = await askGemini(textToSend, messages, geminiKey, playback);
 
-      // Execute extracted action if Gemini sent one
       if (response.action) {
         if (response.action.type === 'next') handleNext();
         if (response.action.type === 'pause') spotifyFetch('/me/player/pause', { method: 'PUT' });
         if (response.action.type === 'play') spotifyFetch('/me/player/play', { method: 'PUT' });
         if (response.action.type === 'search_play' && response.action.query) {
-          const search = await spotifyFetch(`/search?q=${encodeURIComponent(response.action.query)}&type=track,playlist&limit=1`);
+          const search = await spotifyFetch(
+            `/search?q=${encodeURIComponent(response.action.query)}&type=track,playlist&limit=1`
+          );
           const uri = search?.tracks?.items?.[0]?.uri || search?.playlists?.items?.[0]?.uri;
           if (uri) {
             await spotifyFetch('/me/player/play', {
@@ -185,7 +199,7 @@ export default function HomePage() {
         {
           role: 'model',
           text: response.reply,
-          actionTaken: response.action ? `Executed: ${response.action.type}` : undefined,
+          actionTaken: response.action ? `Action: ${response.action.type}` : undefined,
         },
       ]);
     } catch (err: unknown) {
@@ -194,7 +208,7 @@ export default function HomePage() {
         ...prev,
         {
           role: 'model',
-          text: `⚠️ Could not reach Gemini. Please check your API key in Settings. (${msg})`,
+          text: `⚠️ Gemini error: (${msg}). Check your key in Settings.`,
         },
       ]);
     } finally {
@@ -202,40 +216,80 @@ export default function HomePage() {
     }
   }
 
+  function handleFormSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!chatInput.trim()) return;
+    const msg = chatInput;
+    setChatInput('');
+    sendToGemini(msg);
+  }
+
+  function formatTime(ms: number) {
+    const totalSecs = Math.floor(ms / 1000);
+    const mins = Math.floor(totalSecs / 60);
+    const secs = totalSecs % 60;
+    return `${mins}:${secs < 10 ? '0' : ''}${secs}`;
+  }
+
+  const progressPercent = playback
+    ? Math.min(100, Math.max(0, (playback.progressMs / playback.durationMs) * 100))
+    : 0;
+
   return (
-    <div className="min-h-screen bg-[#090a0f] text-zinc-100 flex flex-col font-sans selection:bg-emerald-500/20 selection:text-emerald-300">
-      {/* Top Navbar */}
-      <header className="border-b border-zinc-800/80 bg-[#0d0f15]/80 backdrop-blur-md px-6 py-3.5 flex items-center justify-between sticky top-0 z-20">
+    <div className="min-h-screen bg-[#07080b] text-zinc-100 flex flex-col justify-between selection:bg-emerald-500/20">
+      {/* Dynamic Ambient Background Glow from Album Art */}
+      {playback?.albumArt && (
+        <div
+          className="fixed inset-0 pointer-events-none opacity-20 blur-[140px] transition-all duration-1000 scale-125 z-0"
+          style={{
+            backgroundImage: `url(${playback.albumArt})`,
+            backgroundPosition: 'center',
+            backgroundSize: 'cover',
+          }}
+        />
+      )}
+
+      {/* Top Header Navbar */}
+      <header className="relative z-10 border-b border-white/[0.06] bg-[#0c0d12]/70 backdrop-blur-xl px-6 py-4 flex items-center justify-between">
         <div className="flex items-center gap-3">
-          <div className="w-8 h-8 rounded-lg bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center text-emerald-400">
-            <Disc3 className="w-4 h-4 animate-[spin_8s_linear_infinite]" />
+          <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-emerald-500 to-teal-400 p-[1px] shadow-lg shadow-emerald-500/20">
+            <div className="w-full h-full bg-[#0c0d12] rounded-[11px] flex items-center justify-center">
+              <Disc3 className="w-5 h-5 text-emerald-400 animate-[spin_10s_linear_infinite]" />
+            </div>
           </div>
           <div>
-            <h1 className="font-semibold text-sm tracking-tight text-zinc-100">TrackDeck</h1>
-            <p className="text-[10px] text-zinc-500 font-mono tracking-wider uppercase">Zero-Cost AI Controller</p>
+            <div className="flex items-center gap-2">
+              <h1 className="font-bold text-sm tracking-wide text-zinc-100">TrackDeck</h1>
+              <span className="text-[10px] bg-emerald-500/10 text-emerald-400 font-mono px-2 py-0.5 rounded-full border border-emerald-500/20">
+                PRO
+              </span>
+            </div>
+            <p className="text-[11px] text-zinc-400 flex items-center gap-1.5">
+              <Smartphone className="w-3 h-3 text-zinc-500" />
+              {playback?.device || 'Syncing with Spotify...'}
+            </p>
           </div>
         </div>
 
-        <div className="flex items-center gap-2.5">
-          {/* Gemini AI Status / Key Button */}
+        {/* Action Controls */}
+        <div className="flex items-center gap-3">
           <button
             onClick={() => setShowGeminiModal(true)}
-            className={`text-xs px-3 py-1.5 rounded-full border transition-all flex items-center gap-1.5 ${
+            className={`text-xs px-3.5 py-1.5 rounded-xl border font-medium transition-all flex items-center gap-2 ${
               geminiKey
-                ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300 hover:bg-emerald-500/20'
-                : 'bg-zinc-900 border-zinc-700 text-zinc-400 hover:text-zinc-200 hover:border-zinc-500'
+                ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300 shadow-sm shadow-emerald-500/10 hover:bg-emerald-500/20'
+                : 'bg-white/[0.04] border-white/10 text-zinc-300 hover:bg-white/[0.08]'
             }`}
           >
             <Sparkles className="w-3.5 h-3.5 text-emerald-400" />
-            <span>{geminiKey ? 'Gemini Active' : 'Connect AI (Free)'}</span>
+            <span>{geminiKey ? 'Gemini 1.5 Active' : 'Setup AI Brain'}</span>
           </button>
 
-          {/* Spotify Status & Logout */}
           {isAuthenticated && (
             <button
               onClick={handleLogout}
-              title="Disconnect Spotify"
-              className="p-1.5 text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800 rounded-md transition-colors"
+              title="Logout"
+              className="p-2 text-zinc-400 hover:text-zinc-200 hover:bg-white/[0.05] rounded-xl border border-white/[0.06] transition-colors"
             >
               <LogOut className="w-4 h-4" />
             </button>
@@ -243,146 +297,202 @@ export default function HomePage() {
         </div>
       </header>
 
-      {/* Main Dashboard Canvas */}
-      <main className="flex-1 max-w-6xl w-full mx-auto p-4 md:p-6 grid grid-cols-1 md:grid-cols-12 gap-6 items-start">
-        {/* Left Column: Player Widget */}
-        <section className="md:col-span-5 bg-zinc-900/40 border border-zinc-800/80 rounded-2xl p-6 backdrop-blur-sm flex flex-col justify-between shadow-xl">
+      {/* Main Two-Column Stage */}
+      <main className="relative z-10 flex-1 max-w-7xl w-full mx-auto p-4 md:p-8 grid grid-cols-1 lg:grid-cols-12 gap-8 items-stretch">
+        
+        {/* LEFT COLUMN: The Deck (Vinyl & Playback Showcase) */}
+        <section className="lg:col-span-5 bg-gradient-to-b from-white/[0.06] to-white/[0.02] border border-white/[0.08] rounded-3xl p-7 flex flex-col justify-between backdrop-blur-2xl shadow-2xl relative overflow-hidden">
+          {/* Subtle Ambient Ring */}
+          <div className="absolute -top-24 -left-24 w-60 h-60 bg-emerald-500/10 rounded-full blur-3xl pointer-events-none" />
+
           <div>
-            <div className="flex items-center justify-between pb-4 border-b border-zinc-800/50 mb-6">
-              <span className="text-xs font-mono uppercase text-zinc-500 tracking-wider">Now Playing</span>
-              <span className="flex items-center gap-1.5 text-[11px] text-emerald-400">
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" /> Spotify Connect
+            <div className="flex items-center justify-between pb-5 border-b border-white/[0.06] mb-6">
+              <span className="text-[11px] font-mono uppercase tracking-widest text-zinc-400 flex items-center gap-2">
+                <Radio className="w-3.5 h-3.5 text-emerald-400" /> Living Player
               </span>
+
+              {/* Animated Equalizer when playing */}
+              <div className="flex items-end gap-1 h-3.5">
+                <span className={`w-1 bg-emerald-400 rounded-full ${playback?.isPlaying ? 'h-full animate-[bounce_1s_infinite]' : 'h-1'}`} />
+                <span className={`w-1 bg-emerald-400 rounded-full ${playback?.isPlaying ? 'h-2/3 animate-[bounce_0.8s_infinite]' : 'h-1'}`} />
+                <span className={`w-1 bg-emerald-400 rounded-full ${playback?.isPlaying ? 'h-full animate-[bounce_1.2s_infinite]' : 'h-1'}`} />
+              </div>
             </div>
 
-            {/* Album Art Showcase */}
-            <div className="relative aspect-square w-full rounded-xl overflow-hidden bg-zinc-950 border border-zinc-800/80 mb-6 flex items-center justify-center group shadow-2xl">
+            {/* Glossy Album Card */}
+            <div className="relative aspect-square w-full max-w-[320px] mx-auto rounded-2xl overflow-hidden bg-black/60 border border-white/10 shadow-[0_20px_50px_rgba(0,0,0,0.8)] mb-8 group flex items-center justify-center">
               {playback?.albumArt ? (
                 <img
                   src={playback.albumArt}
                   alt={playback.name}
-                  className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
+                  className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-105"
                 />
               ) : (
-                <div className="flex flex-col items-center gap-2 text-zinc-600">
-                  <Music2 className="w-12 h-12 stroke-[1.25]" />
-                  <span className="text-xs">No active playback</span>
+                <div className="flex flex-col items-center gap-3 text-zinc-500 p-6 text-center">
+                  <Music2 className="w-14 h-14 stroke-[1.25] text-zinc-600 animate-pulse" />
+                  <p className="text-xs font-medium text-zinc-400">Spotify is Idle</p>
+                  <p className="text-[11px] text-zinc-500">Play any track on your phone to turn this deck on</p>
                 </div>
               )}
             </div>
 
-            {/* Track Info */}
-            <div className="space-y-1 mb-6 text-center">
-              <h2 className="font-semibold text-lg text-zinc-100 truncate">
-                {playback?.name || 'No song playing'}
+            {/* Track Metadata */}
+            <div className="text-center space-y-1.5 px-4 mb-6">
+              <h2 className="font-bold text-xl tracking-tight text-white truncate">
+                {playback?.name || 'Awaiting Track...'}
               </h2>
-              <p className="text-sm text-zinc-400 truncate">
-                {playback?.artist || 'Open Spotify on your phone or PC to begin'}
+              <p className="text-sm font-medium text-zinc-300 truncate">
+                {playback?.artist || 'Ready to spin'}
               </p>
               {playback?.album && (
-                <p className="text-[11px] text-zinc-600 truncate">{playback.album}</p>
+                <p className="text-xs text-zinc-500 font-medium truncate">{playback.album}</p>
               )}
+            </div>
+
+            {/* Song Scrub Bar */}
+            <div className="space-y-1.5 mb-6">
+              <div className="w-full bg-white/[0.08] h-1.5 rounded-full overflow-hidden">
+                <div
+                  className="bg-gradient-to-r from-emerald-500 to-teal-400 h-full rounded-full transition-all duration-300"
+                  style={{ width: `${progressPercent}%` }}
+                />
+              </div>
+              <div className="flex justify-between text-[11px] font-mono text-zinc-500">
+                <span>{playback ? formatTime(playback.progressMs) : '0:00'}</span>
+                <span>{playback ? formatTime(playback.durationMs) : '0:00'}</span>
+              </div>
             </div>
           </div>
 
-          {/* Media Controls */}
-          <div className="flex items-center justify-center gap-4 pt-2">
+          {/* Media Dock Controls */}
+          <div className="flex items-center justify-center gap-6 pt-2">
             <button
               onClick={handlePrev}
               disabled={!playback}
-              className="p-3 text-zinc-400 hover:text-zinc-100 disabled:opacity-30 hover:bg-zinc-800/60 rounded-full transition-all"
+              className="p-3 text-zinc-400 hover:text-white hover:bg-white/[0.08] disabled:opacity-30 rounded-2xl transition-all"
             >
-              <SkipBack className="w-5 h-5 fill-current" />
+              <SkipBack className="w-6 h-6 fill-current" />
             </button>
             <button
               onClick={togglePlay}
               disabled={!playback}
-              className="p-4 bg-emerald-500 hover:bg-emerald-400 disabled:opacity-30 text-black rounded-full shadow-lg shadow-emerald-500/20 transition-all hover:scale-105 active:scale-95"
+              className="p-5 bg-gradient-to-tr from-emerald-500 to-emerald-400 hover:from-emerald-400 hover:to-teal-300 disabled:opacity-30 text-black rounded-2xl shadow-xl shadow-emerald-500/25 transition-all hover:scale-105 active:scale-95"
             >
               {playback?.isPlaying ? (
-                <Pause className="w-6 h-6 fill-current" />
+                <Pause className="w-7 h-7 fill-current" />
               ) : (
-                <Play className="w-6 h-6 fill-current ml-0.5" />
+                <Play className="w-7 h-7 fill-current ml-0.5" />
               )}
             </button>
             <button
               onClick={handleNext}
               disabled={!playback}
-              className="p-3 text-zinc-400 hover:text-zinc-100 disabled:opacity-30 hover:bg-zinc-800/60 rounded-full transition-all"
+              className="p-3 text-zinc-400 hover:text-white hover:bg-white/[0.08] disabled:opacity-30 rounded-2xl transition-all"
             >
-              <SkipForward className="w-5 h-5 fill-current" />
+              <SkipForward className="w-6 h-6 fill-current" />
             </button>
           </div>
         </section>
 
-        {/* Right Column: AI Conversation Companion */}
-        <section className="md:col-span-7 bg-zinc-900/40 border border-zinc-800/80 rounded-2xl flex flex-col h-[560px] shadow-xl overflow-hidden">
-          {/* AI Header */}
-          <div className="px-5 py-4 border-b border-zinc-800/70 flex items-center justify-between bg-zinc-900/30">
-            <div className="flex items-center gap-2">
-              <Sparkles className="w-4 h-4 text-emerald-400" />
-              <h3 className="text-sm font-semibold text-zinc-200">Music Companion</h3>
+        {/* RIGHT COLUMN: AI Music Brain & Chat Terminal */}
+        <section className="lg:col-span-7 bg-gradient-to-b from-white/[0.06] to-white/[0.02] border border-white/[0.08] rounded-3xl flex flex-col justify-between backdrop-blur-2xl shadow-2xl overflow-hidden min-h-[600px]">
+          
+          {/* Terminal Header */}
+          <div className="px-6 py-4 border-b border-white/[0.06] bg-black/20 flex items-center justify-between">
+            <div className="flex items-center gap-2.5">
+              <div className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse" />
+              <h3 className="text-xs font-mono uppercase tracking-wider text-zinc-300">
+                Crate-Digger AI Terminal
+              </h3>
             </div>
             <span className="text-[11px] font-mono text-zinc-500">
-              {geminiKey ? 'Gemini 1.5 Flash' : 'AI Offline'}
+              {geminiKey ? 'Active Memory Stream' : 'AI Disconnected'}
             </span>
           </div>
 
-          {/* Chat Messages Log */}
-          <div className="flex-1 overflow-y-auto p-5 space-y-4 text-sm">
+          {/* Conversation Feed */}
+          <div className="flex-1 overflow-y-auto p-6 space-y-4">
             {messages.map((m, i) => (
               <div
                 key={i}
                 className={`flex flex-col ${m.role === 'user' ? 'items-end' : 'items-start'}`}
               >
                 <div
-                  className={`p-3.5 rounded-2xl max-w-[85%] leading-relaxed ${
+                  className={`p-4 rounded-2xl max-w-[85%] text-xs md:text-sm leading-relaxed ${
                     m.role === 'user'
-                      ? 'bg-emerald-500 text-black font-medium rounded-br-none shadow-md shadow-emerald-500/10'
-                      : 'bg-zinc-800/70 border border-zinc-700/50 text-zinc-200 rounded-bl-none'
+                      ? 'bg-gradient-to-tr from-emerald-500 to-emerald-400 text-black font-semibold rounded-br-none shadow-lg shadow-emerald-500/10'
+                      : 'bg-white/[0.04] border border-white/[0.08] text-zinc-200 rounded-bl-none'
                   }`}
                 >
                   {m.text}
                 </div>
                 {m.actionTaken && (
-                  <span className="mt-1 text-[10px] font-mono text-emerald-400/90 bg-emerald-500/10 border border-emerald-500/20 px-2 py-0.5 rounded">
+                  <span className="mt-1.5 text-[10px] font-mono text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-2.5 py-0.5 rounded-full">
                     ⚡ {m.actionTaken}
                   </span>
                 )}
               </div>
             ))}
             {isAiLoading && (
-              <div className="flex items-center gap-2 text-zinc-500 text-xs animate-pulse">
-                <Sparkles className="w-3.5 h-3.5" />
-                Thinking...
+              <div className="flex items-center gap-2 text-xs text-emerald-400 font-mono animate-pulse">
+                <Sparkles className="w-4 h-4" />
+                Thinking & Analyzing Spotify DNA...
               </div>
             )}
             <div ref={chatBottomRef} />
           </div>
 
+          {/* Vibe Quick-Pick Action Chips */}
+          <div className="px-6 py-2.5 border-t border-white/[0.06] bg-black/10 flex items-center gap-2 overflow-x-auto no-scrollbar">
+            <button
+              onClick={() => sendToGemini('Who produced this track and what samples are used?')}
+              className="text-[11px] bg-white/[0.04] hover:bg-white/[0.08] border border-white/10 px-3 py-1.5 rounded-xl text-zinc-300 flex items-center gap-1.5 shrink-0 transition-colors"
+            >
+              <HelpCircle className="w-3 h-3 text-emerald-400" /> Explain this song
+            </button>
+            <button
+              onClick={() => sendToGemini('Play something high focus for studying mathematics')}
+              className="text-[11px] bg-white/[0.04] hover:bg-white/[0.08] border border-white/10 px-3 py-1.5 rounded-xl text-zinc-300 flex items-center gap-1.5 shrink-0 transition-colors"
+            >
+              <Coffee className="w-3 h-3 text-amber-400" /> Study Focus
+            </button>
+            <button
+              onClick={() => sendToGemini('Switch to some late night moody synthwave or R&B')}
+              className="text-[11px] bg-white/[0.04] hover:bg-white/[0.08] border border-white/10 px-3 py-1.5 rounded-xl text-zinc-300 flex items-center gap-1.5 shrink-0 transition-colors"
+            >
+              <Moon className="w-3 h-3 text-indigo-400" /> Late Night
+            </button>
+            <button
+              onClick={() => sendToGemini('Skip this track, play high-energy aux classics')}
+              className="text-[11px] bg-white/[0.04] hover:bg-white/[0.08] border border-white/10 px-3 py-1.5 rounded-xl text-zinc-300 flex items-center gap-1.5 shrink-0 transition-colors"
+            >
+              <Flame className="w-3 h-3 text-rose-400" /> Aux Classics
+            </button>
+          </div>
+
           {/* Input Bar */}
-          <div className="p-4 border-t border-zinc-800/70 bg-zinc-900/30">
+          <div className="p-4 border-t border-white/[0.06] bg-black/30">
             {!geminiKey ? (
               <button
                 onClick={() => setShowGeminiModal(true)}
-                className="w-full py-2.5 px-4 bg-zinc-800 hover:bg-zinc-700 text-zinc-200 rounded-xl text-xs font-medium border border-zinc-700/60 flex items-center justify-center gap-2 transition-all"
+                className="w-full py-3 px-4 bg-gradient-to-r from-emerald-500/10 via-emerald-500/20 to-emerald-500/10 hover:from-emerald-500/20 hover:to-emerald-500/30 text-emerald-300 rounded-2xl text-xs font-medium border border-emerald-500/30 flex items-center justify-center gap-2 transition-all shadow-lg"
               >
-                <Key className="w-3.5 h-3.5 text-emerald-400" />
-                Connect your Free Gemini API Key to Chat
+                <Key className="w-4 h-4 text-emerald-400" />
+                Activate Free Gemini Key to Enable AI Chat
               </button>
             ) : (
-              <form onSubmit={handleSendMessage} className="flex gap-2">
+              <form onSubmit={handleFormSubmit} className="flex gap-2">
                 <input
                   type="text"
                   value={chatInput}
                   onChange={(e) => setChatInput(e.target.value)}
-                  placeholder="Ask about this track, artist trivia, or say 'skip'..."
-                  className="flex-1 bg-zinc-950/80 border border-zinc-800 rounded-xl px-4 py-2.5 text-xs text-zinc-100 placeholder:text-zinc-600 focus:outline-none focus:border-emerald-500/60 transition-colors"
+                  placeholder="Ask about this track, artist history, or say 'skip'..."
+                  className="flex-1 bg-white/[0.03] border border-white/10 rounded-2xl px-4 py-3 text-xs text-zinc-100 placeholder:text-zinc-500 focus:outline-none focus:border-emerald-500/60 transition-colors"
                 />
                 <button
                   type="submit"
                   disabled={isAiLoading || !chatInput.trim()}
-                  className="bg-emerald-500 hover:bg-emerald-400 disabled:opacity-40 text-black p-2.5 rounded-xl transition-all"
+                  className="bg-emerald-500 hover:bg-emerald-400 disabled:opacity-40 text-black p-3 rounded-2xl transition-all shadow-md shadow-emerald-500/20"
                 >
                   <Send className="w-4 h-4" />
                 </button>
@@ -392,47 +502,46 @@ export default function HomePage() {
         </section>
       </main>
 
-      {/* --- MODAL 1: Connect Spotify (Shown if unauthenticated) --- */}
+      {/* --- MODAL 1: Connect Spotify --- */}
       {showSpotifyModal && (
-        <div className="fixed inset-0 bg-black/85 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-[#101218] border border-zinc-800 w-full max-w-md rounded-2xl p-6 shadow-2xl text-center space-y-5">
-            <div className="w-12 h-12 bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 rounded-xl mx-auto flex items-center justify-center">
-              <Disc3 className="w-6 h-6 animate-[spin_10s_linear_infinite]" />
+        <div className="fixed inset-0 bg-black/85 backdrop-blur-md z-50 flex items-center justify-center p-4">
+          <div className="bg-[#0e1017] border border-white/10 w-full max-w-md rounded-3xl p-8 shadow-2xl text-center space-y-6">
+            <div className="w-16 h-16 bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 rounded-2xl mx-auto flex items-center justify-center shadow-lg shadow-emerald-500/10">
+              <Disc3 className="w-8 h-8 animate-[spin_8s_linear_infinite]" />
             </div>
 
             <div>
-              <h2 className="text-lg font-semibold text-zinc-100">Connect to TrackDeck</h2>
-              <p className="text-xs text-zinc-400 mt-1">
-                Log in with Spotify to enable wireless playback controls and personalized music conversations.
+              <h2 className="text-xl font-bold text-white tracking-tight">Connect TrackDeck</h2>
+              <p className="text-xs text-zinc-400 mt-2 leading-relaxed">
+                Connect your Spotify Premium account to control your music wirelessly with custom atmosphere UI.
               </p>
             </div>
 
-            {/* Optional Spotify Client ID input if not in ENV */}
             {!process.env.NEXT_PUBLIC_SPOTIFY_CLIENT_ID && (
-              <div className="text-left space-y-1">
-                <label className="text-[11px] font-mono uppercase tracking-wider text-zinc-500">
+              <div className="text-left space-y-1.5">
+                <label className="text-[10px] font-mono uppercase tracking-wider text-zinc-400">
                   Spotify Client ID
                 </label>
                 <input
                   type="text"
                   value={spotifyClientId}
                   onChange={(e) => setSpotifyClientId(e.target.value)}
-                  placeholder="Paste your Spotify Client ID..."
-                  className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-xs text-zinc-200 focus:outline-none focus:border-emerald-500"
+                  placeholder="Paste Spotify Client ID..."
+                  className="w-full bg-black/60 border border-white/10 rounded-xl px-3.5 py-2.5 text-xs text-zinc-200 focus:outline-none focus:border-emerald-500 font-mono"
                 />
               </div>
             )}
 
             <button
               onClick={() => redirectToSpotifyAuth(spotifyClientId)}
-              className="w-full py-3 bg-[#1DB954] hover:bg-[#1ed760] text-black font-semibold rounded-xl text-sm transition-all shadow-lg shadow-emerald-500/10 flex items-center justify-center gap-2"
+              className="w-full py-3.5 bg-[#1DB954] hover:bg-[#1ed760] text-black font-bold rounded-2xl text-xs tracking-wide uppercase transition-all shadow-lg shadow-emerald-500/20 flex items-center justify-center gap-2 hover:scale-[1.02] active:scale-[0.98]"
             >
               <Music2 className="w-4 h-4 fill-current" />
               Continue with Spotify
             </button>
 
-            <p className="text-[11px] text-zinc-600">
-              Requires Spotify Premium for remote playback control. No passwords stored.
+            <p className="text-[10px] text-zinc-500">
+              Zero passwords stored. Communicates directly with Spotify Web API via PKCE.
             </p>
           </div>
         </div>
@@ -440,67 +549,56 @@ export default function HomePage() {
 
       {/* --- MODAL 2: BYOK Gemini Key Setup --- */}
       {showGeminiModal && (
-        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-[#101218] border border-zinc-800 w-full max-w-lg rounded-2xl p-6 shadow-2xl space-y-5">
-            <div className="flex items-center justify-between border-b border-zinc-800/80 pb-3">
-              <div className="flex items-center gap-2">
-                <Sparkles className="w-4 h-4 text-emerald-400" />
-                <h3 className="font-semibold text-sm text-zinc-100">Connect Google Gemini (Free)</h3>
+        <div className="fixed inset-0 bg-black/85 backdrop-blur-md z-50 flex items-center justify-center p-4">
+          <div className="bg-[#0e1017] border border-white/10 w-full max-w-lg rounded-3xl p-7 shadow-2xl space-y-6">
+            <div className="flex items-center justify-between border-b border-white/[0.08] pb-4">
+              <div className="flex items-center gap-2.5">
+                <Sparkles className="w-5 h-5 text-emerald-400" />
+                <h3 className="font-bold text-sm text-white">Unlock Free AI Companion</h3>
               </div>
               <button
                 onClick={() => setShowGeminiModal(false)}
-                className="text-zinc-500 hover:text-zinc-300 text-xs"
+                className="text-zinc-500 hover:text-white text-xs p-1"
               >
-                ✕ Close
+                ✕
               </button>
             </div>
 
-            <div className="space-y-3 text-xs text-zinc-300">
-              <p className="text-zinc-400">
-                To keep TrackDeck 100% free with unlimited scale, you use your own personal Google Gemini key. No credit card is required.
+            <div className="space-y-4 text-xs text-zinc-300">
+              <p className="text-zinc-400 leading-relaxed">
+                TrackDeck uses Google's latest Gemini 1.5 Flash model. It's 100% free with no credit card required.
               </p>
 
-              <ol className="list-decimal list-inside space-y-2 bg-zinc-950/60 p-3.5 rounded-xl border border-zinc-800/70 text-zinc-400">
-                <li>
-                  Open{' '}
-                  <a
-                    href="https://aistudio.google.com/app/apikey"
-                    target="_blank"
-                    rel="noreferrer"
-                    className="text-emerald-400 hover:underline inline-flex items-center gap-1 font-medium"
-                  >
-                    Google AI Studio <ExternalLink className="w-3 h-3" />
-                  </a>{' '}
-                  and sign in with your Google account.
-                </li>
-                <li>Click the blue <strong>"Create API key"</strong> button.</li>
-                <li>Copy and paste your key below:</li>
-              </ol>
+              <div className="bg-black/50 p-4 rounded-2xl border border-white/[0.06] space-y-2 text-zinc-400">
+                <p>1. Open <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noreferrer" className="text-emerald-400 underline font-semibold inline-flex items-center gap-1">Google AI Studio <ExternalLink className="w-3 h-3" /></a></p>
+                <p>2. Sign in with your normal Google account.</p>
+                <p>3. Click <strong>"Create API key"</strong> and copy it.</p>
+              </div>
 
-              <div className="space-y-1 pt-1">
-                <label className="text-[11px] font-mono uppercase text-zinc-500">Gemini API Key</label>
+              <div className="space-y-1.5">
+                <label className="text-[10px] font-mono uppercase text-zinc-400">Paste Gemini Key</label>
                 <input
                   type="password"
                   value={keyInput}
                   onChange={(e) => setKeyInput(e.target.value)}
                   placeholder="AIzaSy..."
-                  className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3.5 py-2.5 text-xs text-zinc-100 focus:outline-none focus:border-emerald-500/70 font-mono"
+                  className="w-full bg-black/60 border border-white/10 rounded-xl px-4 py-3 text-xs text-zinc-100 focus:outline-none focus:border-emerald-500/80 font-mono"
                 />
               </div>
             </div>
 
-            <div className="flex justify-end gap-2 pt-2">
+            <div className="flex justify-end gap-3 pt-2">
               <button
                 onClick={() => setShowGeminiModal(false)}
-                className="px-4 py-2 text-xs text-zinc-400 hover:text-zinc-200"
+                className="px-4 py-2 text-xs text-zinc-400 hover:text-white"
               >
                 Cancel
               </button>
               <button
                 onClick={saveGeminiKey}
-                className="px-5 py-2 bg-emerald-500 hover:bg-emerald-400 text-black text-xs font-semibold rounded-xl flex items-center gap-1.5 transition-all shadow-md shadow-emerald-500/10"
+                className="px-6 py-2.5 bg-emerald-500 hover:bg-emerald-400 text-black text-xs font-bold rounded-xl flex items-center gap-2 transition-all shadow-lg shadow-emerald-500/20"
               >
-                <Check className="w-3.5 h-3.5" /> Save & Activate
+                <Check className="w-4 h-4" /> Save & Unlock
               </button>
             </div>
           </div>
