@@ -67,6 +67,7 @@ export default function HomePage() {
     lastSyncTime: number;
   } | null>(null);
 
+  const activeDeviceId = useRef<string | null>(null);
   const isActionPending = useRef(false);
 
   // Playlists (Left Wing)
@@ -137,10 +138,10 @@ export default function HomePage() {
     return () => clearInterval(interval);
   }, [isAuthenticated]);
 
-  // Periodic Queue Refresh (Every 12s)
+  // Periodic Queue Refresh (Every 10s)
   useEffect(() => {
     if (!isAuthenticated) return;
-    const interval = setInterval(loadQueue, 12000);
+    const interval = setInterval(loadQueue, 10000);
     return () => clearInterval(interval);
   }, [isAuthenticated]);
 
@@ -171,7 +172,6 @@ export default function HomePage() {
     try {
       const data = await SpotifyAPI.getPlaylists();
       if (data?.items && Array.isArray(data.items)) {
-        // Filter out null or broken items
         setPlaylists(data.items.filter(Boolean));
       }
     } catch (e) {
@@ -183,7 +183,6 @@ export default function HomePage() {
     try {
       const data = await SpotifyAPI.getQueue();
       if (data?.queue && Array.isArray(data.queue)) {
-        // Filter out null or broken items
         setQueue(data.queue.filter(Boolean).slice(0, 15));
       }
     } catch (e) {
@@ -216,10 +215,13 @@ export default function HomePage() {
     try {
       const data = await spotifyFetch('/me/player');
       if (data && data.item) {
+        if (data.device?.id) {
+          activeDeviceId.current = data.device.id;
+        }
+
         const isPlaying = Boolean(data.is_playing);
         const serverProgress = data.progress_ms || 0;
 
-        // Safe artist extraction (handles podcasts/episodes without artists array)
         const artistName = Array.isArray(data.item.artists)
           ? data.item.artists.map((a: { name: string }) => a?.name).filter(Boolean).join(', ')
           : data.item.show?.name || 'Unknown Artist';
@@ -265,15 +267,65 @@ export default function HomePage() {
     }
   }
 
+  // --- SMART PLAY/SEARCH ENGINE (NEVER CLEARS QUEUE) ---
+  async function executeSearchPlay(query: string) {
+    if (!query?.trim()) return;
+
+    try {
+      const devParam = activeDeviceId.current ? `?device_id=${activeDeviceId.current}` : '';
+
+      // Comprehensive search across tracks, albums, artists, and playlists
+      const searchRes = await spotifyFetch(
+        `/search?q=${encodeURIComponent(query.trim())}&type=track,album,playlist,artist&limit=3`
+      );
+
+      const track = searchRes?.tracks?.items?.[0];
+      const album = searchRes?.albums?.items?.[0];
+      const playlist = searchRes?.playlists?.items?.[0];
+      const artist = searchRes?.artists?.items?.[0];
+
+      // 1. If it matched a specific track:
+      if (track?.uri) {
+        // If music is already playing: add to queue and trigger next (preserves queue!)
+        if (playback?.isPlaying) {
+          await SpotifyAPI.addToQueue(track.uri);
+          await spotifyFetch(`/me/player/next${devParam}`, { method: 'POST' });
+        } else {
+          // If idle or paused: start playback directly
+          await spotifyFetch(`/me/player/play${devParam}`, {
+            method: 'PUT',
+            body: JSON.stringify({ uris: [track.uri] }),
+          });
+        }
+      } 
+      // 2. If it matched an album, playlist, or artist:
+      else if (album?.uri || playlist?.uri || artist?.uri) {
+        const contextUri = album?.uri || playlist?.uri || artist?.uri;
+        await spotifyFetch(`/me/player/play${devParam}`, {
+          method: 'PUT',
+          body: JSON.stringify({ context_uri: contextUri }),
+        });
+      }
+
+      setTimeout(() => {
+        fetchNowPlaying();
+        loadQueue();
+      }, 700);
+    } catch (err) {
+      console.warn('Search & play failed', err);
+    }
+  }
+
   // Media Controls
   async function togglePlay() {
     if (!playback) return;
     const targetState = !playback.isPlaying;
+    const devParam = activeDeviceId.current ? `?device_id=${activeDeviceId.current}` : '';
     isActionPending.current = true;
     setPlayback((prev) => (prev ? { ...prev, isPlaying: targetState, lastSyncTime: Date.now() } : null));
 
     try {
-      await spotifyFetch(targetState ? '/me/player/play' : '/me/player/pause', { method: 'PUT' });
+      await spotifyFetch(`/me/player/${targetState ? 'play' : 'pause'}${devParam}`, { method: 'PUT' });
     } finally {
       setTimeout(() => {
         isActionPending.current = false;
@@ -284,8 +336,9 @@ export default function HomePage() {
 
   async function handleNext() {
     isActionPending.current = true;
+    const devParam = activeDeviceId.current ? `?device_id=${activeDeviceId.current}` : '';
     try {
-      await spotifyFetch('/me/player/next', { method: 'POST' });
+      await spotifyFetch(`/me/player/next${devParam}`, { method: 'POST' });
     } finally {
       setTimeout(() => {
         isActionPending.current = false;
@@ -297,8 +350,9 @@ export default function HomePage() {
 
   async function handlePrev() {
     isActionPending.current = true;
+    const devParam = activeDeviceId.current ? `?device_id=${activeDeviceId.current}` : '';
     try {
-      await spotifyFetch('/me/player/previous', { method: 'POST' });
+      await spotifyFetch(`/me/player/previous${devParam}`, { method: 'POST' });
     } finally {
       setTimeout(() => {
         isActionPending.current = false;
@@ -312,12 +366,13 @@ export default function HomePage() {
     const rect = e.currentTarget.getBoundingClientRect();
     const ratio = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
     const newPosMs = Math.floor(ratio * playback.durationMs);
+    const devParam = activeDeviceId.current ? `?device_id=${activeDeviceId.current}` : '';
 
     isActionPending.current = true;
     setPlayback((prev) => (prev ? { ...prev, progressMs: newPosMs, lastSyncTime: Date.now() } : null));
 
     try {
-      await spotifyFetch(`/me/player/seek?position_ms=${newPosMs}`, { method: 'PUT' });
+      await spotifyFetch(`/me/player/seek?position_ms=${newPosMs}${devParam ? `&device_id=${activeDeviceId.current}` : ''}`, { method: 'PUT' });
     } finally {
       setTimeout(() => {
         isActionPending.current = false;
@@ -328,7 +383,11 @@ export default function HomePage() {
 
   async function handlePlayTrack(trackUri: string) {
     if (!trackUri) return;
-    await SpotifyAPI.playUri(undefined, [trackUri]);
+    const devParam = activeDeviceId.current ? `?device_id=${activeDeviceId.current}` : '';
+    await spotifyFetch(`/me/player/play${devParam}`, {
+      method: 'PUT',
+      body: JSON.stringify({ uris: [trackUri] }),
+    });
     setTimeout(() => {
       fetchNowPlaying();
       loadQueue();
@@ -344,7 +403,11 @@ export default function HomePage() {
 
   async function handlePlayPlaylist(playlistUri: string) {
     if (!playlistUri) return;
-    await SpotifyAPI.playUri(playlistUri);
+    const devParam = activeDeviceId.current ? `?device_id=${activeDeviceId.current}` : '';
+    await spotifyFetch(`/me/player/play${devParam}`, {
+      method: 'PUT',
+      body: JSON.stringify({ context_uri: playlistUri }),
+    });
     setTimeout(() => {
       fetchNowPlaying();
       loadQueue();
@@ -367,7 +430,7 @@ export default function HomePage() {
     setShowSettingsModal(false);
     setMessages((prev) => [
       ...prev,
-      { role: 'model', text: '✨ Gemini Copilot is connected and ready.' },
+      { role: 'model', text: '✨ Copilot is connected and ready to rock.' },
     ]);
   }
 
@@ -384,25 +447,13 @@ export default function HomePage() {
 
     try {
       const response = await askGemini(textToSend, messages, geminiKey, playback);
+
       if (response.action) {
         if (response.action.type === 'next') handleNext();
-        if (response.action.type === 'pause') {
-          setPlayback((p) => (p ? { ...p, isPlaying: false } : null));
-          spotifyFetch('/me/player/pause', { method: 'PUT' });
-        }
-        if (response.action.type === 'play') {
-          setPlayback((p) => (p ? { ...p, isPlaying: true } : null));
-          spotifyFetch('/me/player/play', { method: 'PUT' });
-        }
+        if (response.action.type === 'pause') togglePlay();
+        if (response.action.type === 'play') togglePlay();
         if (response.action.type === 'search_play' && response.action.query) {
-          const search = await spotifyFetch(
-            `/search?q=${encodeURIComponent(response.action.query)}&type=track,playlist&limit=1`
-          );
-          const uri = search?.tracks?.items?.[0]?.uri || search?.playlists?.items?.[0]?.uri;
-          if (uri) {
-            await SpotifyAPI.playUri(undefined, [uri]);
-            setTimeout(fetchNowPlaying, 800);
-          }
+          executeSearchPlay(response.action.query);
         }
       }
 
@@ -415,10 +466,10 @@ export default function HomePage() {
         },
       ]);
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : 'Error reaching Gemini';
+      const msg = err instanceof Error ? err.message : 'Error reaching Copilot';
       setMessages((prev) => [
         ...prev,
-        { role: 'model', text: `⚠️ Gemini error: (${msg}). Check your key in Settings.` },
+        { role: 'model', text: `⚠️ Copilot error: (${msg}). Check your key in Settings.` },
       ]);
     } finally {
       setIsAiLoading(false);
@@ -466,9 +517,7 @@ export default function HomePage() {
         />
       )}
 
-      {/* ======================================================== */}
-      {/* 1. TOP BAR                                               */}
-      {/* ======================================================== */}
+      {/* TOP BAR */}
       <header
         className={`relative z-30 h-12 border-b px-5 flex items-center justify-between shrink-0 backdrop-blur-2xl transition-colors duration-300 ${
           isDark
@@ -490,7 +539,7 @@ export default function HomePage() {
             }`}
           >
             <Sparkles className={`w-3 h-3 ${geminiKey ? 'text-emerald-500' : 'text-zinc-400'}`} />
-            <span>{geminiKey ? 'Gemini Connected' : 'Connect AI'}</span>
+            <span>{geminiKey ? 'Copilot Active' : 'Connect AI'}</span>
           </button>
         </div>
 
@@ -524,14 +573,10 @@ export default function HomePage() {
         </div>
       </header>
 
-      {/* ======================================================== */}
-      {/* 2. THREE-COLUMN BALANCED WORKSPACE                        */}
-      {/* ======================================================== */}
+      {/* THREE-COLUMN WORKSPACE */}
       <div className="relative z-10 flex-1 flex overflow-hidden">
         
-        {/* -------------------------------------------------------- */}
-        {/* LEFT WING: PLAYLISTS                                     */}
-        {/* -------------------------------------------------------- */}
+        {/* LEFT WING: PLAYLISTS */}
         <aside
           className={`h-full w-64 border-r backdrop-blur-2xl flex flex-col shrink-0 overflow-hidden transition-colors duration-300 ${
             isDark
@@ -563,7 +608,6 @@ export default function HomePage() {
 
           <div className="flex-1 overflow-y-auto p-2 space-y-1.5 no-scrollbar">
             {selectedPlaylist ? (
-              /* Playlist Track Inspector */
               <div className="space-y-3">
                 <div className="text-center p-2">
                   <img
@@ -579,7 +623,7 @@ export default function HomePage() {
                     onClick={() => handlePlayPlaylist(selectedPlaylist.uri)}
                     className="mt-2 px-3 py-1 bg-emerald-500 hover:bg-emerald-400 text-black text-[11px] font-bold rounded-full transition-transform hover:scale-105 active:scale-95 shadow-md shadow-emerald-500/20"
                   >
-                    Play
+                    Play Playlist
                   </button>
                 </div>
 
@@ -638,7 +682,6 @@ export default function HomePage() {
                 </button>
               </div>
             ) : (
-              /* Playlists Cards */
               playlists.map((pl) => (
                 <div
                   key={pl.id}
@@ -664,9 +707,7 @@ export default function HomePage() {
           </div>
         </aside>
 
-        {/* -------------------------------------------------------- */}
-        {/* CENTER STAGE: CLEAN FLOATING DECK + WIDE COMPACT CHAT   */}
-        {/* -------------------------------------------------------- */}
+        {/* CENTER STAGE: CLEAN FLOATING DECK + WIDE COMPACT CHAT */}
         <main className="flex-1 flex flex-col justify-between overflow-hidden px-6 py-4">
           <div className="flex-1 flex flex-col items-center justify-center min-h-0">
             <div className="w-full max-w-md flex flex-col items-center text-center">
@@ -794,7 +835,7 @@ export default function HomePage() {
                 type="text"
                 value={chatInput}
                 onChange={(e) => setChatInput(e.target.value)}
-                placeholder="Ask about music, samples, or type 'skip'..."
+                placeholder="Ask about music, samples, or say 'play One Beer'..."
                 className={`flex-1 border rounded-xl px-3.5 py-2 text-xs focus:outline-none transition-colors ${
                   isDark
                     ? 'bg-white/[0.03] border-white/10 text-white placeholder:text-zinc-500 focus:border-emerald-500/60'
@@ -812,9 +853,7 @@ export default function HomePage() {
           </div>
         </main>
 
-        {/* -------------------------------------------------------- */}
-        {/* RIGHT WING: QUEUE                                        */}
-        {/* -------------------------------------------------------- */}
+        {/* RIGHT WING: QUEUE */}
         <aside
           className={`h-full w-64 border-l backdrop-blur-2xl flex flex-col shrink-0 overflow-hidden transition-colors duration-300 ${
             isDark
@@ -869,9 +908,7 @@ export default function HomePage() {
         </aside>
       </div>
 
-      {/* ======================================================== */}
-      {/* 3. SETTINGS MODAL                                        */}
-      {/* ======================================================== */}
+      {/* SETTINGS MODAL */}
       {showSettingsModal && (
         <div className="fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex items-center justify-center p-4">
           <div
@@ -921,14 +958,14 @@ export default function HomePage() {
               </div>
             </div>
 
-            {/* SETTING 2: GEMINI API KEY */}
+            {/* SETTING 2: API KEY */}
             <div className="space-y-2">
               <div className="flex items-center justify-between">
                 <label className="text-[11px] font-mono uppercase tracking-wider opacity-60">
-                  Google Gemini Key (Free)
+                  Groq API Key (Free)
                 </label>
                 <a
-                  href="https://aistudio.google.com/app/apikey"
+                  href="https://console.groq.com/keys"
                   target="_blank"
                   rel="noreferrer"
                   className="text-[11px] text-emerald-500 hover:underline flex items-center gap-1"
@@ -940,7 +977,7 @@ export default function HomePage() {
                 type="password"
                 value={keyInput}
                 onChange={(e) => setKeyInput(e.target.value)}
-                placeholder="Paste Gemini key (AIzaSy...)"
+                placeholder="Paste Groq key (gsk_...)"
                 className={`w-full rounded-xl px-3.5 py-2 text-xs font-mono border focus:outline-none ${
                   isDark
                     ? 'bg-black/60 border-white/10 text-white focus:border-emerald-500'

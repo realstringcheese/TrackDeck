@@ -29,11 +29,20 @@ export async function askGemini(
   if (actionMatch && actionMatch[1]) {
     try {
       action = JSON.parse(actionMatch[1]);
-      reply = rawText.replace(/<<<ACTION:(.*?)>>>/, '').trim() || "On it!";
+      reply = rawText.replace(/<<<ACTION:(.*?)>>>/, '').trim();
     } catch (e) {
       console.warn('Failed to parse action JSON from Gemini', e);
     }
   }
 
-  return { reply, action };
+  // Prevent blank answers if the model only generated an action tag
+  if (!reply && action) {
+    if (action.type === 'next') reply = 'Skipping to the next track.';
+    else if (action.type === 'pause') reply = 'Paused playback.';
+    else if (action.type === 'play') reply = 'Resuming playback.';
+    else if (action.type === 'search_play') reply = `Queuing up "${action.query || 'your track'}".`;
+    else reply = 'On it!';
+  }
+
+  return { reply: reply || 'Got it!', action };
 }
