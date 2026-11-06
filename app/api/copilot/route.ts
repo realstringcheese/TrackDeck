@@ -1,17 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server';
 
-// GET handler: so opening it in the browser confirms it works!
 export async function GET() {
   return NextResponse.json({ status: 'TrackDeck Copilot API is live and ready!' });
 }
 
-// POST handler: handles the chat with Gemini
 export async function POST(req: NextRequest) {
   try {
     const { prompt, history, apiKey, currentTrackInfo } = await req.json();
 
     if (!apiKey) {
-      return NextResponse.json({ error: 'Missing Gemini API key' }, { status: 400 });
+      return NextResponse.json({ error: 'Missing Gemini API key in Settings' }, { status: 400 });
     }
 
     const trackContext = currentTrackInfo
@@ -32,16 +30,36 @@ Rules:
 - Never output markdown backticks around the <<<ACTION>>> tag.
 - Only include <<<ACTION>>> if the user gave an explicit command to change playback.`;
 
-    const contents = [
-      ...(history || []).slice(-6).map((m: { role: string; text: string }) => ({
-        role: m.role === 'model' ? 'model' : 'user',
-        parts: [{ text: m.text }],
-      })),
-      {
-        role: 'user',
-        parts: [{ text: prompt }],
-      },
-    ];
+    // CRITICAL FIX: Gemini API requires:
+    // 1. First message MUST be 'user' (cannot be 'model' greeting)
+    // 2. Roles must strictly alternate: user -> model -> user
+    const conversation: { role: 'user' | 'model'; parts: { text: string }[] }[] = [];
+
+    const rawHistory = Array.isArray(history) ? history : [];
+    for (const msg of rawHistory) {
+      // Ignore initial welcome greeting
+      if (msg.text?.includes('TrackDeck Copilot ready')) continue;
+      if (!msg.text?.trim()) continue;
+
+      const role = msg.role === 'model' ? 'model' : 'user';
+
+      // Ensure first message is user
+      if (conversation.length === 0 && role !== 'user') continue;
+
+      // Ensure alternating roles
+      if (conversation.length > 0 && conversation[conversation.length - 1].role === role) {
+        conversation[conversation.length - 1].parts[0].text += `\n${msg.text}`;
+      } else {
+        conversation.push({ role, parts: [{ text: msg.text }] });
+      }
+    }
+
+    // Append the current prompt as user
+    if (conversation.length > 0 && conversation[conversation.length - 1].role === 'user') {
+      conversation[conversation.length - 1].parts[0].text += `\n${prompt}`;
+    } else {
+      conversation.push({ role: 'user', parts: [{ text: prompt }] });
+    }
 
     const modelsToTry = [
       'gemini-2.5-flash',
@@ -53,14 +71,17 @@ Rules:
     let lastError = '';
 
     for (const model of modelsToTry) {
-      const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`;
 
       const res = await fetch(url, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'x-goog-api-key': apiKey.trim(),
+        },
         body: JSON.stringify({
           systemInstruction: { parts: [{ text: systemInstruction }] },
-          contents,
+          contents: conversation,
           generationConfig: {
             temperature: 0.7,
             maxOutputTokens: 500,
@@ -81,7 +102,7 @@ Rules:
     }
 
     return NextResponse.json(
-      { error: lastError || 'Failed to reach Gemini models' },
+      { error: lastError || 'All Gemini models rejected the request' },
       { status: 500 }
     );
   } catch (err: unknown) {

@@ -10,7 +10,6 @@ export async function askGemini(
   apiKey: string,
   currentTrackInfo?: { name: string; artist: string; album: string; isPlaying: boolean } | null
 ): Promise<{ reply: string; action?: { type: string; query?: string } }> {
-  // Call our new unblocked /api/copilot endpoint
   const res = await fetch('/api/copilot', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
