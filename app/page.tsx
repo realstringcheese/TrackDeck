@@ -14,19 +14,14 @@ import {
   Music2,
   Check,
   Disc3,
-  Volume2,
-  VolumeX,
-  Volume1,
-  ListMusic,
   ListPlus,
   ArrowLeft,
-  ChevronRight,
   Settings,
   User,
-  Flame,
+  Sun,
   Moon,
-  Coffee,
-  HelpCircle,
+  RefreshCw,
+  X,
 } from 'lucide-react';
 import { getAccessToken, spotifyFetch, redirectToSpotifyAuth, SpotifyAPI } from '@/lib/spotify';
 import { askGemini, ChatMessage } from '@/lib/gemini';
@@ -49,13 +44,14 @@ interface TrackItem {
 }
 
 export default function HomePage() {
+  const [theme, setTheme] = useState<'dark' | 'light'>('dark');
   const [isAuthenticated, setIsAuthenticated] = useState<boolean | null>(null);
   const [spotifyClientId, setSpotifyClientId] = useState('');
   const [showSpotifyModal, setShowSpotifyModal] = useState(false);
+  const [showSettingsModal, setShowSettingsModal] = useState(false);
 
   // Gemini State
   const [geminiKey, setGeminiKey] = useState<string>('');
-  const [showGeminiModal, setShowGeminiModal] = useState(false);
   const [keyInput, setKeyInput] = useState('');
 
   // Playback State
@@ -71,36 +67,33 @@ export default function HomePage() {
     lastSyncTime: number;
   } | null>(null);
 
-  // Volume
-  const [volume, setVolume] = useState<number>(70);
-  const [prevVolume, setPrevVolume] = useState<number>(70);
-  const volumeDebounceTimer = useRef<NodeJS.Timeout | null>(null);
   const isActionPending = useRef(false);
 
   // Playlists (Left Wing)
   const [playlists, setPlaylists] = useState<Playlist[]>([]);
-  const [isLeftExpanded, setIsLeftExpanded] = useState(false);
   const [selectedPlaylist, setSelectedPlaylist] = useState<Playlist | null>(null);
   const [playlistTracks, setPlaylistTracks] = useState<TrackItem[]>([]);
   const [isLoadingTracks, setIsLoadingTracks] = useState(false);
 
   // Queue (Right Wing)
   const [queue, setQueue] = useState<TrackItem[]>([]);
-  const [isRightExpanded, setIsRightExpanded] = useState(false);
 
   // AI Chat
   const [messages, setMessages] = useState<ChatMessage[]>([
     {
       role: 'model',
-      text: 'Yo! I’m your TrackDeck co-pilot. I can queue tracks from your playlists, explain samples, or match your late night vibe.',
+      text: 'TrackDeck Copilot ready. Ask anything about this track, artist history, or tell me what to queue.',
     },
   ]);
   const [chatInput, setChatInput] = useState('');
   const [isAiLoading, setIsAiLoading] = useState(false);
   const chatBottomRef = useRef<HTMLDivElement>(null);
 
-  // 1. Initial Load
+  // 1. Initial Load & Theme Hydration
   useEffect(() => {
+    const savedTheme = (localStorage.getItem('trackdeck_theme') as 'dark' | 'light') || 'dark';
+    setTheme(savedTheme);
+
     const savedGeminiKey = localStorage.getItem('gemini_api_key') || '';
     setGeminiKey(savedGeminiKey);
     setKeyInput(savedGeminiKey);
@@ -132,25 +125,26 @@ export default function HomePage() {
     });
   }, []);
 
+  function toggleTheme(newTheme: 'dark' | 'light') {
+    setTheme(newTheme);
+    localStorage.setItem('trackdeck_theme', newTheme);
+  }
+
   // 2. Real-Time Sync Polling (Every 1.5s)
   useEffect(() => {
     if (!isAuthenticated) return;
-    const interval = setInterval(() => {
-      fetchNowPlaying();
-    }, 1500);
+    const interval = setInterval(fetchNowPlaying, 1500);
     return () => clearInterval(interval);
   }, [isAuthenticated]);
 
-  // Periodic Queue & Playlist Refresh (Every 12s)
+  // Periodic Queue Refresh (Every 12s)
   useEffect(() => {
     if (!isAuthenticated) return;
-    const interval = setInterval(() => {
-      loadQueue();
-    }, 12000);
+    const interval = setInterval(loadQueue, 12000);
     return () => clearInterval(interval);
   }, [isAuthenticated]);
 
-  // 3. Smooth Sub-Second Progress Ticking
+  // 3. Smooth Sub-Second Scrub Ticking
   useEffect(() => {
     if (!playback?.isPlaying) return;
     const timer = setInterval(() => {
@@ -172,7 +166,7 @@ export default function HomePage() {
     chatBottomRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
-  // Spotify Data Loaders
+  // Data Loaders
   async function loadPlaylists() {
     try {
       const data = await SpotifyAPI.getPlaylists();
@@ -245,10 +239,6 @@ export default function HomePage() {
           localStorage.setItem('trackdeck_cached_track', JSON.stringify(fresh));
           return fresh;
         });
-
-        if (typeof data.device?.volume_percent === 'number') {
-          setVolume(data.device.volume_percent);
-        }
       } else {
         setPlayback((prev) => (prev ? { ...prev, isPlaying: false } : null));
       }
@@ -257,7 +247,7 @@ export default function HomePage() {
     }
   }
 
-  // Media Handlers
+  // Media Controls
   async function togglePlay() {
     if (!playback) return;
     const targetState = !playback.isPlaying;
@@ -318,28 +308,6 @@ export default function HomePage() {
     }
   }
 
-  function handleVolumeChange(e: React.ChangeEvent<HTMLInputElement>) {
-    const newVol = parseInt(e.target.value, 10);
-    setVolume(newVol);
-    if (volumeDebounceTimer.current) clearTimeout(volumeDebounceTimer.current);
-
-    volumeDebounceTimer.current = setTimeout(async () => {
-      await spotifyFetch(`/me/player/volume?volume_percent=${newVol}`, { method: 'PUT' });
-    }, 150);
-  }
-
-  async function toggleMute() {
-    if (volume > 0) {
-      setPrevVolume(volume);
-      setVolume(0);
-      await spotifyFetch('/me/player/volume?volume_percent=0', { method: 'PUT' });
-    } else {
-      const restore = prevVolume || 50;
-      setVolume(restore);
-      await spotifyFetch(`/me/player/volume?volume_percent=${restore}`, { method: 'PUT' });
-    }
-  }
-
   async function handlePlayTrack(trackUri: string) {
     await SpotifyAPI.playUri(undefined, [trackUri]);
     setTimeout(() => {
@@ -375,21 +343,18 @@ export default function HomePage() {
     if (!keyInput.trim()) return;
     localStorage.setItem('gemini_api_key', keyInput.trim());
     setGeminiKey(keyInput.trim());
-    setShowGeminiModal(false);
+    setShowSettingsModal(false);
     setMessages((prev) => [
       ...prev,
-      {
-        role: 'model',
-        text: '✨ Gemini Copilot is online! What vibe or playlist are we feeling?',
-      },
+      { role: 'model', text: '✨ Gemini Copilot is connected and ready.' },
     ]);
   }
 
-  // Gemini AI Chat
+  // AI Chat
   async function sendToGemini(textToSend: string) {
     if (!textToSend.trim() || isAiLoading) return;
     if (!geminiKey) {
-      setShowGeminiModal(true);
+      setShowSettingsModal(true);
       return;
     }
 
@@ -458,12 +423,20 @@ export default function HomePage() {
     ? Math.min(100, Math.max(0, (playback.progressMs / playback.durationMs) * 100))
     : 0;
 
+  const isDark = theme === 'dark';
+
   return (
-    <div className="h-screen w-screen overflow-hidden bg-[#07080b] text-zinc-100 flex flex-col font-sans select-none selection:bg-emerald-500/20">
+    <div
+      className={`h-screen w-screen overflow-hidden flex flex-col font-sans select-none transition-colors duration-300 ${
+        isDark ? 'bg-[#07080b] text-zinc-100' : 'bg-[#f4f5f8] text-zinc-900'
+      }`}
+    >
       {/* Dynamic Ambient Background Glow */}
       {playback?.albumArt && (
         <div
-          className="fixed inset-0 pointer-events-none opacity-25 blur-[160px] transition-all duration-1000 scale-125 z-0"
+          className={`fixed inset-0 pointer-events-none transition-all duration-1000 scale-125 z-0 ${
+            isDark ? 'opacity-25 blur-[160px]' : 'opacity-15 blur-[140px]'
+          }`}
           style={{
             backgroundImage: `url(${playback.albumArt})`,
             backgroundPosition: 'center',
@@ -473,38 +446,48 @@ export default function HomePage() {
       )}
 
       {/* ======================================================== */}
-      {/* 1. TOP BAR (Darker, Thin, Centered Name, Left AI, Right Settings) */}
+      {/* 1. TOP BAR (Thin, Clean, Darker/Lighter, Centered Logo)   */}
       {/* ======================================================== */}
-      <header className="relative z-30 h-12 border-b border-white/[0.04] bg-[#040507]/90 backdrop-blur-2xl px-5 flex items-center justify-between shrink-0">
+      <header
+        className={`relative z-30 h-12 border-b px-5 flex items-center justify-between shrink-0 backdrop-blur-2xl transition-colors duration-300 ${
+          isDark
+            ? 'border-white/[0.05] bg-[#040507]/90 text-white'
+            : 'border-zinc-200/80 bg-white/80 text-zinc-900'
+        }`}
+      >
         {/* Left: AI Connectivity Status */}
         <div className="flex items-center">
           <button
-            onClick={() => setShowGeminiModal(true)}
+            onClick={() => setShowSettingsModal(true)}
             className={`text-[11px] font-medium px-3 py-1 rounded-full border transition-all flex items-center gap-1.5 ${
               geminiKey
-                ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300 hover:bg-emerald-500/20'
-                : 'bg-white/[0.03] border-white/10 text-zinc-400 hover:text-zinc-200 hover:bg-white/[0.06]'
+                ? isDark
+                  ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300 hover:bg-emerald-500/20'
+                  : 'bg-emerald-50 border-emerald-300 text-emerald-700 hover:bg-emerald-100'
+                : isDark
+                ? 'bg-white/[0.04] border-white/10 text-zinc-400 hover:text-zinc-200'
+                : 'bg-zinc-100 border-zinc-200 text-zinc-600 hover:text-zinc-900'
             }`}
           >
-            <Sparkles className={`w-3 h-3 ${geminiKey ? 'text-emerald-400' : 'text-zinc-400'}`} />
+            <Sparkles className={`w-3 h-3 ${geminiKey ? 'text-emerald-500' : 'text-zinc-400'}`} />
             <span>{geminiKey ? 'Gemini Connected' : 'Connect AI'}</span>
           </button>
         </div>
 
         {/* Center: Brand & Logo */}
         <div className="flex items-center gap-2">
-          <Disc3 className="w-4 h-4 text-emerald-400 animate-[spin_10s_linear_infinite]" />
-          <h1 className="font-bold text-sm tracking-widest uppercase text-white font-mono">
-            TrackDeck
-          </h1>
+          <Disc3 className="w-4 h-4 text-emerald-500 animate-[spin_10s_linear_infinite]" />
+          <h1 className="font-bold text-xs tracking-widest uppercase font-mono">TrackDeck</h1>
         </div>
 
-        {/* Right: Settings & Account Icons */}
-        <div className="flex items-center gap-1.5">
+        {/* Right: Settings Gear & Account */}
+        <div className="flex items-center gap-1">
           <button
-            onClick={() => setShowGeminiModal(true)}
-            title="Settings & Keys"
-            className="p-1.5 text-zinc-400 hover:text-zinc-100 hover:bg-white/[0.06] rounded-lg transition-colors"
+            onClick={() => setShowSettingsModal(true)}
+            title="Settings & Appearance"
+            className={`p-1.5 rounded-lg transition-colors ${
+              isDark ? 'text-zinc-400 hover:text-white hover:bg-white/[0.06]' : 'text-zinc-600 hover:text-black hover:bg-zinc-200/60'
+            }`}
           >
             <Settings className="w-4 h-4" />
           </button>
@@ -513,7 +496,9 @@ export default function HomePage() {
             <button
               onClick={handleLogout}
               title="Spotify Account (Logout)"
-              className="p-1.5 text-zinc-400 hover:text-rose-400 hover:bg-white/[0.06] rounded-lg transition-colors"
+              className={`p-1.5 rounded-lg transition-colors ${
+                isDark ? 'text-zinc-400 hover:text-rose-400 hover:bg-white/[0.06]' : 'text-zinc-600 hover:text-rose-600 hover:bg-zinc-200/60'
+              }`}
             >
               <User className="w-4 h-4" />
             </button>
@@ -522,104 +507,97 @@ export default function HomePage() {
       </header>
 
       {/* ======================================================== */}
-      {/* 2. THREE-WING MAIN CANVAS */}
+      {/* 2. THREE-COLUMN BALANCED WORKSPACE                        */}
       {/* ======================================================== */}
       <div className="relative z-10 flex-1 flex overflow-hidden">
         
         {/* -------------------------------------------------------- */}
-        {/* LEFT WING: PLAYLISTS (Mini Rail -> Expanded -> Full Inspector) */}
+        {/* LEFT WING: PLAYLISTS (Substantial w-64 by default)       */}
         {/* -------------------------------------------------------- */}
         <aside
-          onMouseEnter={() => !selectedPlaylist && setIsLeftExpanded(true)}
-          onMouseLeave={() => !selectedPlaylist && setIsLeftExpanded(false)}
-          className={`h-full border-r border-white/[0.05] bg-black/40 backdrop-blur-2xl flex flex-col transition-all duration-300 ease-out shrink-0 overflow-hidden ${
-            selectedPlaylist ? 'w-80' : isLeftExpanded ? 'w-72' : 'w-16'
+          className={`h-full w-64 border-r backdrop-blur-2xl flex flex-col shrink-0 overflow-hidden transition-colors duration-300 ${
+            isDark
+              ? 'border-white/[0.05] bg-black/40 text-zinc-100'
+              : 'border-zinc-200/80 bg-white/70 text-zinc-900 shadow-sm'
           }`}
         >
-          {/* Header & Title */}
-          <div className="p-3.5 border-b border-white/[0.04] flex items-center justify-between min-h-[48px]">
+          {/* Header */}
+          <div
+            className={`p-3.5 border-b flex items-center justify-between min-h-[44px] ${
+              isDark ? 'border-white/[0.04]' : 'border-zinc-200/60'
+            }`}
+          >
             {selectedPlaylist ? (
               <button
                 onClick={() => setSelectedPlaylist(null)}
-                className="text-xs text-zinc-400 hover:text-white flex items-center gap-1.5 transition-colors"
-              >
-                <ArrowLeft className="w-3.5 h-3.5" />
-                <span className="font-semibold text-xs truncate">All Playlists</span>
-              </button>
-            ) : (
-              <h2
-                className={`font-mono text-zinc-400 uppercase tracking-wider transition-all duration-300 ${
-                  isLeftExpanded
-                    ? 'text-xs font-bold w-full text-center text-zinc-200'
-                    : 'text-[9px] text-center w-full'
+                className={`text-xs flex items-center gap-1.5 font-medium transition-colors ${
+                  isDark ? 'text-zinc-400 hover:text-white' : 'text-zinc-600 hover:text-black'
                 }`}
               >
-                {isLeftExpanded ? 'Playlists' : 'Playlists'}
+                <ArrowLeft className="w-3.5 h-3.5" />
+                <span>All Playlists</span>
+              </button>
+            ) : (
+              <h2 className="text-xs font-mono uppercase tracking-wider font-semibold opacity-70">
+                Playlists
               </h2>
             )}
           </div>
 
-          {/* Playlist Content View */}
+          {/* List Content */}
           <div className="flex-1 overflow-y-auto p-2 space-y-1.5 no-scrollbar">
-            {/* STATE 3: FULL PLAYLIST INSPECTOR WITH TRACKLIST */}
             {selectedPlaylist ? (
-              <div className="space-y-4">
-                {/* Playlist Banner */}
+              /* Playlist Track Inspector */
+              <div className="space-y-3">
                 <div className="text-center p-2">
                   <img
                     src={selectedPlaylist.images?.[0]?.url || ''}
                     alt={selectedPlaylist.name}
-                    className="w-32 h-32 mx-auto rounded-2xl shadow-xl object-cover mb-2"
+                    className="w-28 h-28 mx-auto rounded-2xl shadow-lg object-cover mb-2"
                   />
-                  <h3 className="font-bold text-sm text-white truncate">{selectedPlaylist.name}</h3>
-                  <p className="text-[11px] text-zinc-400">{selectedPlaylist.tracks.total} tracks</p>
+                  <h3 className="font-bold text-xs truncate">{selectedPlaylist.name}</h3>
+                  <p className="text-[10px] opacity-60">{selectedPlaylist.tracks.total} songs</p>
                   <button
                     onClick={() => handlePlayPlaylist(selectedPlaylist.uri)}
-                    className="mt-2.5 px-4 py-1.5 bg-emerald-500 hover:bg-emerald-400 text-black text-xs font-bold rounded-full transition-transform hover:scale-105 active:scale-95 shadow-md shadow-emerald-500/20"
+                    className="mt-2 px-3 py-1 bg-emerald-500 hover:bg-emerald-400 text-black text-[11px] font-bold rounded-full transition-transform hover:scale-105 active:scale-95 shadow-md shadow-emerald-500/20"
                   >
-                    Play Playlist
+                    Play
                   </button>
                 </div>
 
-                {/* Tracklist */}
-                <div className="space-y-1 border-t border-white/[0.04] pt-2">
+                <div className={`space-y-0.5 border-t pt-2 ${isDark ? 'border-white/[0.04]' : 'border-zinc-200'}`}>
                   {isLoadingTracks ? (
-                    <div className="p-4 text-center text-xs text-zinc-500 animate-pulse">
-                      Loading songs...
-                    </div>
+                    <div className="p-4 text-center text-xs opacity-50 animate-pulse">Loading songs...</div>
                   ) : (
                     playlistTracks.map((track, idx) => (
                       <div
                         key={`${track.id}-${idx}`}
-                        className="group flex items-center justify-between p-2 rounded-xl hover:bg-white/[0.06] transition-colors text-xs"
+                        className={`group flex items-center justify-between p-2 rounded-xl transition-colors text-xs ${
+                          isDark ? 'hover:bg-white/[0.06]' : 'hover:bg-zinc-200/60'
+                        }`}
                       >
-                        <div className="flex items-center gap-2.5 truncate flex-1 pr-2">
-                          <span className="text-[10px] font-mono text-zinc-500 w-4">{idx + 1}</span>
-                          <div className="truncate">
-                            <p className="font-medium text-zinc-200 truncate group-hover:text-emerald-400 transition-colors">
-                              {track.name}
-                            </p>
-                            <p className="text-[10px] text-zinc-500 truncate">
-                              {track.artists.map((a) => a.name).join(', ')}
-                            </p>
-                          </div>
+                        <div className="truncate flex-1 pr-2">
+                          <p className="font-medium truncate group-hover:text-emerald-500 transition-colors">
+                            {track.name}
+                          </p>
+                          <p className="text-[10px] opacity-60 truncate">
+                            {track.artists.map((a) => a.name).join(', ')}
+                          </p>
                         </div>
-
-                        {/* Hover Quick Actions */}
                         <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                           <button
                             onClick={() => handlePlayTrack(track.uri)}
-                            title="Play Now"
-                            className="p-1 hover:text-emerald-400 text-zinc-400"
+                            title="Play"
+                            className="p-1 hover:text-emerald-500"
                           >
-                            <Play className="w-3.5 h-3.5 fill-current" />
+                            <Play className="w-3 h-3 fill-current" />
                           </button>
                           <button
                             onClick={() => handleAddToQueue(track)}
-                            title="Add to Queue"
-                            className="p-1 hover:text-emerald-400 text-zinc-400"
+                            title="Queue"
+                            className="p-1 hover:text-emerald-500"
                           >
-                            <ListPlus className="w-3.5 h-3.5" />
+                            <ListPlus className="w-3 h-3" />
                           </button>
                         </div>
                       </div>
@@ -627,31 +605,37 @@ export default function HomePage() {
                   )}
                 </div>
               </div>
+            ) : playlists.length === 0 ? (
+              <div className="p-4 text-center space-y-2">
+                <p className="text-xs opacity-60">Playlists not loaded.</p>
+                <button
+                  onClick={() => redirectToSpotifyAuth(spotifyClientId)}
+                  className="px-3 py-1.5 bg-emerald-500 hover:bg-emerald-400 text-black text-[11px] font-bold rounded-xl transition-all"
+                >
+                  Sync Permissions
+                </button>
+              </div>
             ) : (
-              /* STATE 1 & 2: MINI RAIL OR EXPANDED CARDS */
+              /* Normal Playlists Cards */
               playlists.map((pl) => (
                 <div
                   key={pl.id}
                   onClick={() => openPlaylistInspector(pl)}
-                  className={`group rounded-xl cursor-pointer hover:bg-white/[0.06] transition-all flex items-center p-1.5 ${
-                    isLeftExpanded ? 'gap-3' : 'justify-center'
+                  className={`group rounded-xl cursor-pointer transition-all flex items-center gap-3 p-2 ${
+                    isDark ? 'hover:bg-white/[0.06]' : 'hover:bg-zinc-200/60'
                   }`}
                 >
                   <img
                     src={pl.images?.[0]?.url || ''}
                     alt={pl.name}
-                    className={`rounded-lg object-cover shadow-md transition-all ${
-                      isLeftExpanded ? 'w-11 h-11' : 'w-10 h-10'
-                    }`}
+                    className="w-10 h-10 rounded-lg object-cover shadow-sm shrink-0"
                   />
-                  {isLeftExpanded && (
-                    <div className="truncate flex-1">
-                      <p className="text-xs font-semibold text-zinc-200 truncate group-hover:text-emerald-400 transition-colors">
-                        {pl.name}
-                      </p>
-                      <p className="text-[10px] text-zinc-500">{pl.tracks.total} songs</p>
-                    </div>
-                  )}
+                  <div className="truncate flex-1">
+                    <p className="text-xs font-semibold truncate group-hover:text-emerald-500 transition-colors">
+                      {pl.name}
+                    </p>
+                    <p className="text-[10px] opacity-60">{pl.tracks.total} songs</p>
+                  </div>
                 </div>
               ))
             )}
@@ -659,16 +643,22 @@ export default function HomePage() {
         </aside>
 
         {/* -------------------------------------------------------- */}
-        {/* CENTER STAGE: UNIFIED FLOATING DECK & BOTTOM 1/3 AI CHAT */}
+        {/* CENTER STAGE: CLEAN FLOATING DECK + WIDE COMPACT CHAT   */}
         {/* -------------------------------------------------------- */}
-        <main className="flex-1 flex flex-col justify-between overflow-hidden">
+        <main className="flex-1 flex flex-col justify-between overflow-hidden px-6 py-4">
           
-          {/* TOP 2/3: THE SEAMLESS FLOATING PLAYER (NO DIVIDERS) */}
-          <div className="flex-1 flex flex-col items-center justify-center p-4 min-h-0">
-            <div className="w-full max-w-sm flex flex-col items-center text-center">
+          {/* UPPER DECK: ARTWORK & CONTROLS (NO VOLUME SLIDER) */}
+          <div className="flex-1 flex flex-col items-center justify-center min-h-0">
+            <div className="w-full max-w-md flex flex-col items-center text-center">
               
-              {/* Glossy Album Art with Dynamic Ambient Shadow */}
-              <div className="relative aspect-square w-52 md:w-60 rounded-3xl overflow-hidden bg-black/70 border border-white/10 shadow-[0_20px_50px_rgba(0,0,0,0.85)] mb-4 group flex items-center justify-center">
+              {/* Album Art */}
+              <div
+                className={`relative aspect-square w-56 md:w-64 rounded-3xl overflow-hidden border shadow-2xl mb-4 group flex items-center justify-center transition-all ${
+                  isDark
+                    ? 'bg-black/70 border-white/10 shadow-[0_20px_50px_rgba(0,0,0,0.85)]'
+                    : 'bg-white border-zinc-200/80 shadow-xl'
+                }`}
+              >
                 {playback?.albumArt ? (
                   <img
                     src={playback.albumArt}
@@ -676,19 +666,19 @@ export default function HomePage() {
                     className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-105"
                   />
                 ) : (
-                  <div className="flex flex-col items-center gap-2 text-zinc-500 p-4">
-                    <Music2 className="w-12 h-12 stroke-[1.2] text-zinc-600" />
-                    <p className="text-xs text-zinc-400">Spotify is Idle</p>
+                  <div className="flex flex-col items-center gap-2 opacity-50 p-4">
+                    <Music2 className="w-12 h-12 stroke-[1.2]" />
+                    <p className="text-xs">Spotify is Idle</p>
                   </div>
                 )}
               </div>
 
-              {/* Title & Artist (Flowing seamlessly under art) */}
-              <div className="space-y-0.5 px-4 mb-3 w-full">
-                <h2 className="font-bold text-lg text-white truncate tracking-tight">
+              {/* Title & Artist */}
+              <div className="space-y-0.5 px-4 mb-4 w-full">
+                <h2 className="font-bold text-lg truncate tracking-tight">
                   {playback?.name || 'Awaiting Track...'}
                 </h2>
-                <p className="text-xs font-medium text-zinc-400 truncate">
+                <p className="text-xs font-medium opacity-60 truncate">
                   {playback?.artist || 'Open Spotify on phone to spin'}
                 </p>
               </div>
@@ -697,33 +687,35 @@ export default function HomePage() {
               <div className="w-full space-y-1 mb-4">
                 <div
                   onClick={handleSeek}
-                  className="w-full bg-white/[0.08] hover:bg-white/[0.14] h-1.5 rounded-full overflow-hidden cursor-pointer transition-colors relative"
+                  className={`w-full h-1.5 rounded-full overflow-hidden cursor-pointer transition-colors relative ${
+                    isDark ? 'bg-white/[0.08] hover:bg-white/[0.14]' : 'bg-zinc-200 hover:bg-zinc-300'
+                  }`}
                   title="Click to jump"
                 >
                   <div
-                    className="bg-gradient-to-r from-emerald-500 to-teal-400 h-full rounded-full transition-[width] duration-300 ease-linear"
+                    className="bg-emerald-500 h-full rounded-full transition-[width] duration-300 ease-linear"
                     style={{ width: `${progressPercent}%` }}
                   />
                 </div>
-                <div className="flex justify-between text-[10px] font-mono text-zinc-500">
+                <div className="flex justify-between text-[10px] font-mono opacity-50">
                   <span>{playback ? formatTime(playback.progressMs) : '0:00'}</span>
                   <span>{playback ? formatTime(playback.durationMs) : '0:00'}</span>
                 </div>
               </div>
 
-              {/* Play / Next / Prev Controls */}
-              <div className="flex items-center justify-center gap-6 mb-3">
+              {/* Media Controls */}
+              <div className="flex items-center justify-center gap-8">
                 <button
                   onClick={handlePrev}
                   disabled={!playback}
-                  className="p-2 text-zinc-400 hover:text-white active:scale-90 disabled:opacity-30 rounded-xl transition-all"
+                  className="p-2 opacity-70 hover:opacity-100 active:scale-90 disabled:opacity-30 transition-all"
                 >
                   <SkipBack className="w-5 h-5 fill-current" />
                 </button>
                 <button
                   onClick={togglePlay}
                   disabled={!playback}
-                  className="p-4 bg-gradient-to-tr from-emerald-500 to-emerald-400 hover:from-emerald-400 hover:to-teal-300 disabled:opacity-30 text-black rounded-2xl shadow-xl shadow-emerald-500/25 transition-all hover:scale-105 active:scale-95"
+                  className="p-4 bg-emerald-500 hover:bg-emerald-400 disabled:opacity-30 text-black rounded-2xl shadow-xl shadow-emerald-500/25 transition-all hover:scale-105 active:scale-95"
                 >
                   {playback?.isPlaying ? (
                     <Pause className="w-6 h-6 fill-current" />
@@ -734,191 +726,122 @@ export default function HomePage() {
                 <button
                   onClick={handleNext}
                   disabled={!playback}
-                  className="p-2 text-zinc-400 hover:text-white active:scale-90 disabled:opacity-30 rounded-xl transition-all"
+                  className="p-2 opacity-70 hover:opacity-100 active:scale-90 disabled:opacity-30 transition-all"
                 >
                   <SkipForward className="w-5 h-5 fill-current" />
                 </button>
               </div>
-
-              {/* Volume Slider (Directly floating below controls) */}
-              <div className="w-48 flex items-center gap-2.5 bg-black/30 border border-white/[0.05] rounded-xl px-3 py-1.5">
-                <button onClick={toggleMute} className="text-zinc-400 hover:text-white">
-                  {volume === 0 ? (
-                    <VolumeX className="w-3.5 h-3.5 text-rose-400" />
-                  ) : volume < 50 ? (
-                    <Volume1 className="w-3.5 h-3.5" />
-                  ) : (
-                    <Volume2 className="w-3.5 h-3.5 text-emerald-400" />
-                  )}
-                </button>
-                <input
-                  type="range"
-                  min="0"
-                  max="100"
-                  value={volume}
-                  onChange={handleVolumeChange}
-                  className="flex-1 h-1 bg-white/[0.1] rounded-lg appearance-none cursor-pointer accent-emerald-400 focus:outline-none"
-                />
-                <span className="text-[10px] font-mono text-zinc-400 w-6 text-right">
-                  {volume}%
-                </span>
-              </div>
             </div>
           </div>
 
-          {/* BOTTOM 1/3: COMPACT CONVERSATIONAL AI CONSOLE */}
-          <div className="h-[34vh] border-t border-white/[0.05] bg-[#040507]/80 backdrop-blur-2xl flex flex-col justify-between p-3.5 shrink-0 max-w-2xl w-full mx-auto rounded-t-3xl shadow-2xl">
-            {/* Scrollable Message History */}
-            <div className="flex-1 overflow-y-auto space-y-2 pr-1 text-xs">
+          {/* LOWER DECK: WIDE, COMPACT AI CONSOLE (NO CHIPS) */}
+          <div
+            className={`w-full max-w-3xl mx-auto h-[20vh] border rounded-2xl backdrop-blur-2xl flex flex-col justify-between p-3 shrink-0 shadow-lg transition-colors ${
+              isDark
+                ? 'border-white/[0.06] bg-[#040507]/80'
+                : 'border-zinc-200/80 bg-white/80'
+            }`}
+          >
+            {/* Wide Message History Stream */}
+            <div className="flex-1 overflow-y-auto space-y-1.5 pr-2 text-xs">
               {messages.map((m, i) => (
                 <div
                   key={i}
                   className={`flex flex-col ${m.role === 'user' ? 'items-end' : 'items-start'}`}
                 >
                   <div
-                    className={`px-3.5 py-2 rounded-2xl max-w-[85%] leading-relaxed ${
+                    className={`px-3 py-1.5 rounded-xl max-w-[90%] leading-relaxed ${
                       m.role === 'user'
-                        ? 'bg-emerald-500 text-black font-semibold rounded-br-none'
-                        : 'bg-white/[0.04] border border-white/[0.06] text-zinc-200 rounded-bl-none'
+                        ? 'bg-emerald-500 text-black font-semibold'
+                        : isDark
+                        ? 'bg-white/[0.04] text-zinc-200 border border-white/[0.05]'
+                        : 'bg-zinc-100 text-zinc-800 border border-zinc-200'
                     }`}
                   >
                     {m.text}
                   </div>
-                  {m.actionTaken && (
-                    <span className="mt-1 text-[9px] font-mono text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-2 py-0.5 rounded-full">
-                      ⚡ {m.actionTaken}
-                    </span>
-                  )}
                 </div>
               ))}
               {isAiLoading && (
-                <div className="flex items-center gap-2 text-xs text-emerald-400 font-mono animate-pulse">
-                  <Sparkles className="w-3.5 h-3.5" />
-                  Thinking...
+                <div className="flex items-center gap-1.5 text-[11px] text-emerald-500 font-mono animate-pulse">
+                  <Sparkles className="w-3 h-3" /> Thinking...
                 </div>
               )}
               <div ref={chatBottomRef} />
             </div>
 
-            {/* Quick-Vibe Chips */}
-            <div className="py-1.5 flex items-center gap-1.5 overflow-x-auto no-scrollbar shrink-0">
+            {/* Wide Input Bar */}
+            <form onSubmit={handleFormSubmit} className="flex gap-2 pt-2">
+              <input
+                type="text"
+                value={chatInput}
+                onChange={(e) => setChatInput(e.target.value)}
+                placeholder="Ask about music, samples, or type 'skip'..."
+                className={`flex-1 border rounded-xl px-3.5 py-2 text-xs focus:outline-none transition-colors ${
+                  isDark
+                    ? 'bg-white/[0.03] border-white/10 text-white placeholder:text-zinc-500 focus:border-emerald-500/60'
+                    : 'bg-zinc-50 border-zinc-200 text-zinc-900 placeholder:text-zinc-400 focus:border-emerald-500'
+                }`}
+              />
               <button
-                onClick={() => sendToGemini('Who produced this track and what samples are used?')}
-                className="text-[10px] bg-white/[0.03] hover:bg-white/[0.07] border border-white/[0.06] px-2.5 py-1 rounded-lg text-zinc-300 flex items-center gap-1 shrink-0"
+                type="submit"
+                disabled={isAiLoading || !chatInput.trim()}
+                className="bg-emerald-500 hover:bg-emerald-400 disabled:opacity-40 text-black p-2 rounded-xl transition-all"
               >
-                <HelpCircle className="w-3 h-3 text-emerald-400" /> Explain song
+                <Send className="w-3.5 h-3.5" />
               </button>
-              <button
-                onClick={() => sendToGemini('Play something high focus for studying mathematics')}
-                className="text-[10px] bg-white/[0.03] hover:bg-white/[0.07] border border-white/[0.06] px-2.5 py-1 rounded-lg text-zinc-300 flex items-center gap-1 shrink-0"
-              >
-                <Coffee className="w-3 h-3 text-amber-400" /> Study Focus
-              </button>
-              <button
-                onClick={() => sendToGemini('Switch to some late night moody synthwave or R&B')}
-                className="text-[10px] bg-white/[0.03] hover:bg-white/[0.07] border border-white/[0.06] px-2.5 py-1 rounded-lg text-zinc-300 flex items-center gap-1 shrink-0"
-              >
-                <Moon className="w-3 h-3 text-indigo-400" /> Late Night
-              </button>
-              <button
-                onClick={() => sendToGemini('Skip this track, play high-energy aux classics')}
-                className="text-[10px] bg-white/[0.03] hover:bg-white/[0.07] border border-white/[0.06] px-2.5 py-1 rounded-lg text-zinc-300 flex items-center gap-1 shrink-0"
-              >
-                <Flame className="w-3 h-3 text-rose-400" /> Aux Classics
-              </button>
-            </div>
-
-            {/* AI Prompt Input Bar */}
-            <div className="pt-1 shrink-0">
-              {!geminiKey ? (
-                <button
-                  onClick={() => setShowGeminiModal(true)}
-                  className="w-full py-2 px-3 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-300 rounded-xl text-xs font-medium border border-emerald-500/30 flex items-center justify-center gap-2 transition-all"
-                >
-                  <Key className="w-3.5 h-3.5 text-emerald-400" />
-                  Connect Free Gemini Key to Chat
-                </button>
-              ) : (
-                <form onSubmit={handleFormSubmit} className="flex gap-2">
-                  <input
-                    type="text"
-                    value={chatInput}
-                    onChange={(e) => setChatInput(e.target.value)}
-                    placeholder="Ask about this song, artist history, or say 'skip'..."
-                    className="flex-1 bg-white/[0.03] border border-white/10 rounded-xl px-3.5 py-2 text-xs text-zinc-100 placeholder:text-zinc-500 focus:outline-none focus:border-emerald-500/60"
-                  />
-                  <button
-                    type="submit"
-                    disabled={isAiLoading || !chatInput.trim()}
-                    className="bg-emerald-500 hover:bg-emerald-400 disabled:opacity-40 text-black p-2 rounded-xl transition-all"
-                  >
-                    <Send className="w-3.5 h-3.5" />
-                  </button>
-                </form>
-              )}
-            </div>
+            </form>
           </div>
         </main>
 
         {/* -------------------------------------------------------- */}
-        {/* RIGHT WING: QUEUE (Mini Album Cover Filmstrip -> Expanded Details) */}
+        {/* RIGHT WING: QUEUE (Substantial w-64 with titles by default)*/}
         {/* -------------------------------------------------------- */}
         <aside
-          onMouseEnter={() => setIsRightExpanded(true)}
-          onMouseLeave={() => setIsRightExpanded(false)}
-          className={`h-full border-l border-white/[0.05] bg-black/40 backdrop-blur-2xl flex flex-col transition-all duration-300 ease-out shrink-0 overflow-hidden ${
-            isRightExpanded ? 'w-72' : 'w-16'
+          className={`h-full w-64 border-l backdrop-blur-2xl flex flex-col shrink-0 overflow-hidden transition-colors duration-300 ${
+            isDark
+              ? 'border-white/[0.05] bg-black/40 text-zinc-100'
+              : 'border-zinc-200/80 bg-white/70 text-zinc-900 shadow-sm'
           }`}
         >
-          {/* Header & Title */}
-          <div className="p-3.5 border-b border-white/[0.04] flex items-center justify-center min-h-[48px]">
-            <h2
-              className={`font-mono text-zinc-400 uppercase tracking-wider transition-all duration-300 ${
-                isRightExpanded
-                  ? 'text-xs font-bold text-center w-full text-zinc-200'
-                  : 'text-[9px] text-center w-full'
-              }`}
-            >
-              {isRightExpanded ? 'Queue' : 'Queue'}
+          {/* Header */}
+          <div
+            className={`p-3.5 border-b flex items-center justify-between min-h-[44px] ${
+              isDark ? 'border-white/[0.04]' : 'border-zinc-200/60'
+            }`}
+          >
+            <h2 className="text-xs font-mono uppercase tracking-wider font-semibold opacity-70">
+              Queue
             </h2>
           </div>
 
-          {/* Queue Track List */}
-          <div className="flex-1 overflow-y-auto p-2 space-y-2 no-scrollbar">
+          {/* Queue List */}
+          <div className="flex-1 overflow-y-auto p-2 space-y-1.5 no-scrollbar">
             {queue.length === 0 ? (
-              <div className="p-4 text-center text-[11px] text-zinc-500">
-                {isRightExpanded ? 'Queue is empty' : 'Empty'}
-              </div>
+              <div className="p-4 text-center text-xs opacity-50">Queue is empty</div>
             ) : (
               queue.map((track, idx) => (
                 <div
                   key={`${track.id}-${idx}`}
                   onClick={() => handlePlayTrack(track.uri)}
-                  className={`group rounded-xl cursor-pointer hover:bg-white/[0.06] transition-all flex items-center p-1.5 ${
-                    isRightExpanded ? 'gap-3' : 'justify-center'
+                  className={`group rounded-xl cursor-pointer transition-all flex items-center gap-3 p-2 ${
+                    isDark ? 'hover:bg-white/[0.06]' : 'hover:bg-zinc-200/60'
                   }`}
                   title={`${track.name} - ${track.artists.map((a) => a.name).join(', ')}`}
                 >
-                  {/* Album Cover Thumbnail */}
                   <img
                     src={track.album?.images?.[0]?.url || ''}
                     alt={track.name}
-                    className={`rounded-lg object-cover shadow-md transition-all ${
-                      isRightExpanded ? 'w-10 h-10' : 'w-10 h-10'
-                    }`}
+                    className="w-10 h-10 rounded-lg object-cover shadow-sm shrink-0"
                   />
-
-                  {/* Expanded Track Details */}
-                  {isRightExpanded && (
-                    <div className="truncate flex-1">
-                      <p className="text-xs font-semibold text-zinc-200 truncate group-hover:text-emerald-400 transition-colors">
-                        {track.name}
-                      </p>
-                      <p className="text-[10px] text-zinc-500 truncate">
-                        {track.artists.map((a) => a.name).join(', ')}
-                      </p>
-                    </div>
-                  )}
+                  <div className="truncate flex-1">
+                    <p className="text-xs font-semibold truncate group-hover:text-emerald-500 transition-colors">
+                      {track.name}
+                    </p>
+                    <p className="text-[10px] opacity-60 truncate">
+                      {track.artists.map((a) => a.name).join(', ')}
+                    </p>
+                  </div>
                 </div>
               ))
             )}
@@ -927,18 +850,132 @@ export default function HomePage() {
       </div>
 
       {/* ======================================================== */}
-      {/* MODALS */}
+      {/* 3. SETTINGS MODAL (Theme First, Gemini Key, Permissions) */}
       {/* ======================================================== */}
-      {/* Spotify Auth Modal */}
+      {showSettingsModal && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex items-center justify-center p-4">
+          <div
+            className={`w-full max-w-md rounded-3xl p-6 shadow-2xl space-y-5 border transition-colors ${
+              isDark ? 'bg-[#0e1017] border-white/10 text-white' : 'bg-white border-zinc-200 text-zinc-900'
+            }`}
+          >
+            {/* Header */}
+            <div className={`flex items-center justify-between border-b pb-3 ${isDark ? 'border-white/[0.08]' : 'border-zinc-200'}`}>
+              <div className="flex items-center gap-2">
+                <Settings className="w-4 h-4 text-emerald-500" />
+                <h3 className="font-bold text-sm">Settings</h3>
+              </div>
+              <button
+                onClick={() => setShowSettingsModal(false)}
+                className="opacity-50 hover:opacity-100 p-1"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* SETTING 1: APPEARANCE / THEME TOGGLE */}
+            <div className="space-y-2">
+              <label className="text-[11px] font-mono uppercase tracking-wider opacity-60">
+                Appearance
+              </label>
+              <div className={`grid grid-cols-2 gap-2 p-1 rounded-2xl border ${isDark ? 'bg-black/40 border-white/10' : 'bg-zinc-100 border-zinc-200'}`}>
+                <button
+                  onClick={() => toggleTheme('dark')}
+                  className={`py-2 px-3 rounded-xl text-xs font-semibold flex items-center justify-center gap-2 transition-all ${
+                    isDark
+                      ? 'bg-zinc-800 text-white shadow-sm'
+                      : 'text-zinc-600 hover:text-black'
+                  }`}
+                >
+                  <Moon className="w-3.5 h-3.5" /> Dark
+                </button>
+                <button
+                  onClick={() => toggleTheme('light')}
+                  className={`py-2 px-3 rounded-xl text-xs font-semibold flex items-center justify-center gap-2 transition-all ${
+                    !isDark
+                      ? 'bg-white text-black shadow-sm'
+                      : 'text-zinc-400 hover:text-white'
+                  }`}
+                >
+                  <Sun className="w-3.5 h-3.5 text-amber-500" /> Light
+                </button>
+              </div>
+            </div>
+
+            {/* SETTING 2: GEMINI API KEY */}
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <label className="text-[11px] font-mono uppercase tracking-wider opacity-60">
+                  Google Gemini Key (Free)
+                </label>
+                <a
+                  href="https://aistudio.google.com/app/apikey"
+                  target="_blank"
+                  rel="noreferrer"
+                  className="text-[11px] text-emerald-500 hover:underline flex items-center gap-1"
+                >
+                  Get Key <ExternalLink className="w-2.5 h-2.5" />
+                </a>
+              </div>
+              <input
+                type="password"
+                value={keyInput}
+                onChange={(e) => setKeyInput(e.target.value)}
+                placeholder="Paste Gemini key (AIzaSy...)"
+                className={`w-full rounded-xl px-3.5 py-2 text-xs font-mono border focus:outline-none ${
+                  isDark
+                    ? 'bg-black/60 border-white/10 text-white focus:border-emerald-500'
+                    : 'bg-zinc-50 border-zinc-200 text-zinc-900 focus:border-emerald-500'
+                }`}
+              />
+            </div>
+
+            {/* SETTING 3: SPOTIFY PLAYLIST SYNC / PERMISSIONS */}
+            <div className="space-y-2 border-t pt-3 border-inherit">
+              <label className="text-[11px] font-mono uppercase tracking-wider opacity-60">
+                Spotify Sync
+              </label>
+              <button
+                onClick={() => redirectToSpotifyAuth(spotifyClientId)}
+                className={`w-full py-2 px-3 rounded-xl text-xs font-medium border flex items-center justify-center gap-2 transition-colors ${
+                  isDark
+                    ? 'bg-white/[0.04] border-white/10 hover:bg-white/[0.08] text-zinc-300'
+                    : 'bg-zinc-100 border-zinc-200 hover:bg-zinc-200 text-zinc-800'
+                }`}
+              >
+                <RefreshCw className="w-3 h-3 text-emerald-500" /> Refresh Playlist Permissions
+              </button>
+            </div>
+
+            {/* Save Button */}
+            <div className="flex justify-end gap-2 pt-2">
+              <button
+                onClick={() => setShowSettingsModal(false)}
+                className="px-3 py-1.5 text-xs opacity-60 hover:opacity-100"
+              >
+                Close
+              </button>
+              <button
+                onClick={saveGeminiKey}
+                className="px-5 py-2 bg-emerald-500 hover:bg-emerald-400 text-black text-xs font-bold rounded-xl transition-all shadow-md shadow-emerald-500/20"
+              >
+                Save
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Spotify Login Modal */}
       {showSpotifyModal && (
         <div className="fixed inset-0 bg-black/85 backdrop-blur-md z-50 flex items-center justify-center p-4">
-          <div className="bg-[#0c0d12] border border-white/10 w-full max-w-md rounded-3xl p-7 shadow-2xl text-center space-y-5">
-            <div className="w-14 h-14 bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 rounded-2xl mx-auto flex items-center justify-center">
+          <div className="bg-[#0c0d12] border border-white/10 w-full max-w-md rounded-3xl p-7 shadow-2xl text-center space-y-5 text-white">
+            <div className="w-14 h-14 bg-emerald-500/10 border border-emerald-500/30 text-emerald-500 rounded-2xl mx-auto flex items-center justify-center">
               <Disc3 className="w-7 h-7 animate-[spin_8s_linear_infinite]" />
             </div>
 
             <div>
-              <h2 className="text-lg font-bold text-white">Connect TrackDeck</h2>
+              <h2 className="text-lg font-bold">Connect TrackDeck</h2>
               <p className="text-xs text-zinc-400 mt-1">
                 Log in to control your phone's Spotify wirelessly with custom atmosphere.
               </p>
@@ -954,7 +991,7 @@ export default function HomePage() {
                   value={spotifyClientId}
                   onChange={(e) => setSpotifyClientId(e.target.value)}
                   placeholder="Paste Spotify Client ID..."
-                  className="w-full bg-black/60 border border-white/10 rounded-xl px-3 py-2 text-xs text-zinc-200 focus:outline-none focus:border-emerald-500 font-mono"
+                  className="w-full bg-black/60 border border-white/10 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-emerald-500 font-mono"
                 />
               </div>
             )}
@@ -966,63 +1003,6 @@ export default function HomePage() {
               <Music2 className="w-4 h-4 fill-current" />
               Continue with Spotify
             </button>
-          </div>
-        </div>
-      )}
-
-      {/* Gemini API Key Modal */}
-      {showGeminiModal && (
-        <div className="fixed inset-0 bg-black/85 backdrop-blur-md z-50 flex items-center justify-center p-4">
-          <div className="bg-[#0c0d12] border border-white/10 w-full max-w-md rounded-3xl p-6 shadow-2xl space-y-4">
-            <div className="flex items-center justify-between border-b border-white/[0.08] pb-3">
-              <div className="flex items-center gap-2">
-                <Sparkles className="w-4 h-4 text-emerald-400" />
-                <h3 className="font-bold text-sm text-white">Google Gemini Copilot</h3>
-              </div>
-              <button
-                onClick={() => setShowGeminiModal(false)}
-                className="text-zinc-500 hover:text-white text-xs"
-              >
-                ✕
-              </button>
-            </div>
-
-            <div className="space-y-3 text-xs text-zinc-300">
-              <p className="text-zinc-400">
-                Uses Google Gemini 1.5 Flash. Completely free with no credit card.
-              </p>
-              <div className="bg-black/50 p-3 rounded-xl border border-white/[0.05] space-y-1.5 text-zinc-400">
-                <p>1. Open <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noreferrer" className="text-emerald-400 underline font-medium inline-flex items-center gap-1">Google AI Studio <ExternalLink className="w-2.5 h-2.5" /></a></p>
-                <p>2. Sign in with your Google account.</p>
-                <p>3. Click <strong>"Create API key"</strong> and paste it below:</p>
-              </div>
-
-              <div className="space-y-1">
-                <label className="text-[10px] font-mono uppercase text-zinc-400">API Key</label>
-                <input
-                  type="password"
-                  value={keyInput}
-                  onChange={(e) => setKeyInput(e.target.value)}
-                  placeholder="AIzaSy..."
-                  className="w-full bg-black/60 border border-white/10 rounded-xl px-3.5 py-2 text-xs text-zinc-100 focus:outline-none focus:border-emerald-500 font-mono"
-                />
-              </div>
-            </div>
-
-            <div className="flex justify-end gap-2 pt-1">
-              <button
-                onClick={() => setShowGeminiModal(false)}
-                className="px-3 py-1.5 text-xs text-zinc-400 hover:text-white"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={saveGeminiKey}
-                className="px-5 py-2 bg-emerald-500 hover:bg-emerald-400 text-black text-xs font-bold rounded-xl flex items-center gap-1.5 transition-all shadow-md shadow-emerald-500/20"
-              >
-                <Check className="w-3.5 h-3.5" /> Save Key
-              </button>
-            </div>
           </div>
         </div>
       )}
