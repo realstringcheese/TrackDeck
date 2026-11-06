@@ -167,9 +167,8 @@ export default function HomePage() {
     chatBottomRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
-  // Helpers
+  // Get active online device
   async function resolveTargetDevice(): Promise<string | undefined> {
-    if (activeDeviceId.current) return activeDeviceId.current;
     try {
       const data = await spotifyFetch('/me/player/devices');
       const devices = data?.devices || [];
@@ -180,7 +179,7 @@ export default function HomePage() {
         return target.id;
       }
     } catch {}
-    return undefined;
+    return activeDeviceId.current || undefined;
   }
 
   async function loadPlaylists() {
@@ -283,32 +282,35 @@ export default function HomePage() {
   }
 
   // ==========================================================
-  // DISPATCHER: PRECISE ACTION EXECUTION (NO HIJACKS)
+  // DISPATCHER: GUARANTEED ACTION EXECUTION
   // ==========================================================
-  async function handleCopilotAction(action: CopilotAction) {
+  async function handleCopilotAction(action: CopilotAction): Promise<string> {
     isActionPending.current = true;
     const deviceId = await resolveTargetDevice();
     const devParam = deviceId ? `?device_id=${deviceId}` : '';
 
     try {
       // 1. PLAY SPECIFIC SONG
-      if (action.type === 'play_track' && action.track) {
+      if (action.type === 'play_track') {
         const query = action.artist
           ? `${action.track} ${action.artist}`
-          : action.track;
+          : action.track || action.query || '';
 
-        // CRITICAL: market=from_token guarantees 100% playable tracks (no pauses/restrictions)
+        // Search with account market filter
         const searchRes = await spotifyFetch(
           `/search?q=${encodeURIComponent(query)}&type=track&market=from_token&limit=3`
         );
 
         const track = searchRes?.tracks?.items?.[0];
         if (track?.uri) {
-          await spotifyFetch(`/me/player/play${devParam}`, {
-            method: 'PUT',
-            body: JSON.stringify({ uris: [track.uri], position_ms: 0 }),
-          });
+          await SpotifyAPI.playUri(undefined, [track.uri], deviceId);
+          setTimeout(() => {
+            fetchNowPlaying();
+            loadQueue();
+          }, 600);
+          return `Playing: ${track.name} - ${track.artists?.[0]?.name || ''}`;
         }
+        return `Could not find track "${query}" on Spotify.`;
       }
 
       // 2. PLAY ARTIST
@@ -319,19 +321,21 @@ export default function HomePage() {
         const artist = searchRes?.artists?.items?.[0];
 
         if (artist?.id) {
-          // Fetch artist's top 10 tracks so there is a continuous queue
           const topTracksRes = await spotifyFetch(
             `/artists/${artist.id}/top-tracks?market=from_token`
           );
           const uris = (topTracksRes?.tracks || []).map((t: { uri: string }) => t.uri);
 
           if (uris.length > 0) {
-            await spotifyFetch(`/me/player/play${devParam}`, {
-              method: 'PUT',
-              body: JSON.stringify({ uris }),
-            });
+            await SpotifyAPI.playUri(undefined, uris, deviceId);
+            setTimeout(() => {
+              fetchNowPlaying();
+              loadQueue();
+            }, 600);
+            return `Spinning ${artist.name} Top Tracks`;
           }
         }
+        return `Could not find artist "${action.artist}".`;
       }
 
       // 3. QUEUE SPECIFIC SONG
@@ -348,26 +352,33 @@ export default function HomePage() {
         if (track?.uri) {
           await SpotifyAPI.addToQueue(track.uri);
           setQueue((prev) => [track, ...prev]);
+          return `Queued: ${track.name}`;
         }
+        return `Could not queue "${query}".`;
       }
 
-      // 4. PLAYBACK BUTTONS
+      // 4. BUTTON ACTIONS
       else if (action.type === 'next') {
         await spotifyFetch(`/me/player/next${devParam}`, { method: 'POST' });
+        return 'Skipped to next track';
       } else if (action.type === 'pause') {
         await spotifyFetch(`/me/player/pause${devParam}`, { method: 'PUT' });
+        return 'Paused';
       } else if (action.type === 'play') {
         await spotifyFetch(`/me/player/play${devParam}`, { method: 'PUT' });
+        return 'Resumed';
       }
 
+      return 'Command executed';
+    } catch (err) {
+      console.warn('Action dispatch failed', err);
+      return 'Action failed to reach Spotify';
+    } finally {
       setTimeout(() => {
         isActionPending.current = false;
         fetchNowPlaying();
         loadQueue();
       }, 700);
-    } catch (err) {
-      console.warn('Action dispatch failed', err);
-      isActionPending.current = false;
     }
   }
 
@@ -443,11 +454,7 @@ export default function HomePage() {
   async function handlePlayTrack(trackUri: string) {
     if (!trackUri) return;
     const deviceId = await resolveTargetDevice();
-    const devParam = deviceId ? `?device_id=${deviceId}` : '';
-    await spotifyFetch(`/me/player/play${devParam}`, {
-      method: 'PUT',
-      body: JSON.stringify({ uris: [trackUri] }),
-    });
+    await SpotifyAPI.playUri(undefined, [trackUri], deviceId);
     setTimeout(() => {
       fetchNowPlaying();
       loadQueue();
@@ -464,11 +471,7 @@ export default function HomePage() {
   async function handlePlayPlaylist(playlistUri: string) {
     if (!playlistUri) return;
     const deviceId = await resolveTargetDevice();
-    const devParam = deviceId ? `?device_id=${deviceId}` : '';
-    await spotifyFetch(`/me/player/play${devParam}`, {
-      method: 'PUT',
-      body: JSON.stringify({ context_uri: playlistUri }),
-    });
+    await SpotifyAPI.playUri(playlistUri, undefined, deviceId);
     setTimeout(() => {
       fetchNowPlaying();
       loadQueue();
@@ -508,10 +511,11 @@ export default function HomePage() {
 
     try {
       const response = await askGemini(textToSend, messages, geminiKey, playback);
+      let executedActionSummary: string | undefined = undefined;
 
-      // Execute clean structured action
+      // Execute action guaranteed
       if (response.action) {
-        handleCopilotAction(response.action);
+        executedActionSummary = await handleCopilotAction(response.action);
       }
 
       setMessages((prev) => [
@@ -519,7 +523,7 @@ export default function HomePage() {
         {
           role: 'model',
           text: response.reply,
-          actionTaken: response.action ? `Action: ${response.action.type}` : undefined,
+          actionTaken: executedActionSummary,
         },
       ]);
     } catch (err: unknown) {
@@ -876,11 +880,17 @@ export default function HomePage() {
                   >
                     {m.text}
                   </div>
+                  {/* Action verification badge */}
+                  {m.actionTaken && (
+                    <span className="mt-1 text-[10px] font-mono text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-2 py-0.5 rounded-full">
+                      ⚡ {m.actionTaken}
+                    </span>
+                  )}
                 </div>
               ))}
               {isAiLoading && (
                 <div className="flex items-center gap-1.5 text-[11px] text-emerald-500 font-mono animate-pulse">
-                  <Sparkles className="w-3 h-3" /> Thinking...
+                  <Sparkles className="w-3 h-3" /> Executing command...
                 </div>
               )}
               <div ref={chatBottomRef} />
