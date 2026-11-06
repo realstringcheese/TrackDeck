@@ -4,14 +4,38 @@ export async function GET() {
   return NextResponse.json({ status: 'TrackDeck Copilot API is live and ready!' });
 }
 
-const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
-
 export async function POST(req: NextRequest) {
   try {
     const { prompt, history, apiKey, currentTrackInfo } = await req.json();
 
     if (!apiKey) {
       return NextResponse.json({ error: 'Missing Gemini API key in Settings' }, { status: 400 });
+    }
+
+    const cleanKey = apiKey.trim();
+
+    // 1. DYNAMIC MODEL DISCOVERY: Ask Google what models are valid for this exact key
+    let targetModel = 'gemini-2.0-flash';
+    try {
+      const listRes = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models?key=${cleanKey}`
+      );
+      if (listRes.ok) {
+        const listData = await listRes.json();
+        const available = listData.models || [];
+        // Find the first flash or pro model supporting generateContent
+        const validModel = available.find(
+          (m: { name: string; supportedGenerationMethods?: string[] }) =>
+            m.supportedGenerationMethods?.includes('generateContent') &&
+            (m.name.includes('flash') || m.name.includes('pro'))
+        );
+        if (validModel?.name) {
+          targetModel = validModel.name.replace(/^models\//, '');
+        }
+      }
+    } catch {
+      // Fallback to stable default
+      targetModel = 'gemini-2.0-flash';
     }
 
     const trackContext = currentTrackInfo
@@ -32,7 +56,7 @@ Rules:
 - Never output markdown backticks around the <<<ACTION>>> tag.
 - Only include <<<ACTION>>> if the user gave an explicit command to change playback.`;
 
-    // Ensure conversation strictly starts with 'user' and alternates roles
+    // Sanitize conversation: must start with 'user' and alternate roles
     const conversation: { role: 'user' | 'model'; parts: { text: string }[] }[] = [];
 
     const rawHistory = Array.isArray(history) ? history : [];
@@ -57,68 +81,36 @@ Rules:
       conversation.push({ role: 'user', parts: [{ text: prompt }] });
     }
 
-    // Models ordered by speed and capacity pool
-    const modelsToTry = [
-      'gemini-2.5-flash',
-      'gemini-2.0-flash-lite',
-      'gemini-2.0-flash',
-      'gemini-flash-latest',
-    ];
+    // Call the verified working model
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${targetModel}:generateContent`;
 
-    let lastError = '';
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-goog-api-key': cleanKey,
+      },
+      body: JSON.stringify({
+        systemInstruction: { parts: [{ text: systemInstruction }] },
+        contents: conversation,
+        generationConfig: {
+          temperature: 0.7,
+          maxOutputTokens: 500,
+        },
+      }),
+    });
 
-    for (const model of modelsToTry) {
-      const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`;
-
-      // Try each model, retrying once if Google reports 503 overload
-      for (let attempt = 0; attempt < 2; attempt++) {
-        try {
-          const res = await fetch(url, {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'x-goog-api-key': apiKey.trim(),
-            },
-            body: JSON.stringify({
-              systemInstruction: { parts: [{ text: systemInstruction }] },
-              contents: conversation,
-              generationConfig: {
-                temperature: 0.7,
-                maxOutputTokens: 500,
-              },
-            }),
-          });
-
-          // If model doesn't exist, skip to next model
-          if (res.status === 404) break;
-
-          // If Google reports 503 (Overloaded), wait 1 second and retry
-          if (res.status === 503) {
-            lastError = 'Google model is overloaded. Retrying...';
-            await sleep(1000);
-            continue;
-          }
-
-          if (!res.ok) {
-            lastError = await res.text();
-            break;
-          }
-
-          const data = await res.json();
-          const rawText = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
-          if (rawText) {
-            return NextResponse.json({ rawText });
-          }
-        } catch (e: unknown) {
-          lastError = e instanceof Error ? e.message : 'Fetch error';
-        }
-      }
+    if (!res.ok) {
+      const errBody = await res.text();
+      return NextResponse.json(
+        { error: `Google API Error [${res.status}]: ${errBody}` },
+        { status: res.status }
+      );
     }
 
-    return NextResponse.json(
-      { error: lastError || 'Google servers are currently congested. Please try again in a moment.' },
-      { status: 503 }
-    );
+    const data = await res.json();
+    const rawText = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+    return NextResponse.json({ rawText });
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : 'Internal server error';
     return NextResponse.json({ error: message }, { status: 500 });
