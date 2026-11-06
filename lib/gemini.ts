@@ -29,7 +29,7 @@ export async function askGemini(
   if (actionMatch && actionMatch[1]) {
     try {
       action = JSON.parse(actionMatch[1]);
-      reply = rawText.replace(/<<<ACTION:(.*?)>>>/, '').trim();
+      reply = rawText.replace(/<<<ACTION:(.*?)>>>/, '').trim() || "On it!";
     } catch (e) {
       console.warn('Failed to parse action JSON from Gemini', e);
     }
