@@ -1,3 +1,9 @@
+export interface CopilotAction {
+  type: 'next' | 'pause' | 'play' | 'play_track' | 'play_artist' | 'queue_track';
+  track?: string;
+  artist?: string;
+}
+
 export interface ChatMessage {
   role: 'user' | 'model';
   text: string;
@@ -9,7 +15,7 @@ export async function askGemini(
   history: ChatMessage[],
   apiKey: string,
   currentTrackInfo?: { name: string; artist: string; album: string; isPlaying: boolean } | null
-): Promise<{ reply: string; action?: { type: string; query?: string } }> {
+): Promise<{ reply: string; action?: CopilotAction }> {
   const res = await fetch('/api/copilot', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -23,7 +29,7 @@ export async function askGemini(
 
   const { rawText } = await res.json();
   let reply = rawText;
-  let action: { type: string; query?: string } | undefined = undefined;
+  let action: CopilotAction | undefined = undefined;
 
   const actionMatch = rawText.match(/<<<ACTION:(.*?)>>>/);
   if (actionMatch && actionMatch[1]) {
@@ -31,16 +37,17 @@ export async function askGemini(
       action = JSON.parse(actionMatch[1]);
       reply = rawText.replace(/<<<ACTION:(.*?)>>>/, '').trim();
     } catch (e) {
-      console.warn('Failed to parse action JSON from Gemini', e);
+      console.warn('Failed to parse action JSON from Copilot', e);
     }
   }
 
-  // Prevent blank answers if the model only generated an action tag
   if (!reply && action) {
     if (action.type === 'next') reply = 'Skipping to the next track.';
     else if (action.type === 'pause') reply = 'Paused playback.';
     else if (action.type === 'play') reply = 'Resuming playback.';
-    else if (action.type === 'search_play') reply = `Queuing up "${action.query || 'your track'}".`;
+    else if (action.type === 'play_track') reply = `Playing "${action.track || 'track'}".`;
+    else if (action.type === 'play_artist') reply = `Spinning ${action.artist || 'artist'}.`;
+    else if (action.type === 'queue_track') reply = `Queued "${action.track || 'track'}".`;
     else reply = 'On it!';
   }
 

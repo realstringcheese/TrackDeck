@@ -114,21 +114,33 @@ export async function spotifyFetch(endpoint: string, options: RequestInit = {}) 
   });
 
   if (res.status === 204) return null;
-  if (!res.ok) return null;
+
+  // Print exact error to console instead of hiding it
+  if (!res.ok) {
+    const errText = await res.text();
+    console.warn(`Spotify API [${res.status}] on ${endpoint}:`, errText);
+    return null;
+  }
+
   return res.json();
 }
 
-// User Playlists & Queue Endpoints
 export const SpotifyAPI = {
   getPlaylists: () => spotifyFetch('/me/playlists?limit=25'),
   getPlaylistTracks: (playlistId: string) => spotifyFetch(`/playlists/${playlistId}/tracks?limit=50`),
   getQueue: () => spotifyFetch('/me/player/queue'),
   addToQueue: (uri: string) => spotifyFetch(`/me/player/queue?uri=${encodeURIComponent(uri)}`, { method: 'POST' }),
-  playUri: (contextUri?: string, uris?: string[]) =>
-    spotifyFetch('/me/player/play', {
+  playUri: (contextUri?: string, uris?: string[], deviceId?: string) => {
+    const devParam = deviceId ? `?device_id=${deviceId}` : '';
+    const body: { context_uri?: string; uris?: string[] } = {};
+    if (contextUri) body.context_uri = contextUri;
+    if (uris) body.uris = uris;
+
+    return spotifyFetch(`/me/player/play${devParam}`, {
       method: 'PUT',
-      body: JSON.stringify({ context_uri: contextUri, uris }),
-    }),
+      body: JSON.stringify(body),
+    });
+  },
 };
 
 function generateRandomString(length: number): string {
