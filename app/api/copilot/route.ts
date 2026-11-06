@@ -33,108 +33,86 @@ Rules:
 - Only include <<<ACTION>>> if the user gave an explicit command to change playback.`;
 
     // ----------------------------------------------------
-    // ENGINE A: GROQ (Active Free Tier Models)
+    // ENGINE A: GROQ (Dynamic Live Model Discovery)
     // ----------------------------------------------------
     if (cleanKey.startsWith('gsk_')) {
-      const messages = [
-        { role: 'system', content: systemInstruction },
-        ...(history || []).slice(-6).map((m: { role: string; text: string }) => ({
-          role: m.role === 'model' ? 'assistant' : 'user',
-          content: m.text,
-        })),
-        { role: 'user', content: prompt },
-      ];
-
-      // Groq's high-speed free tier models
-      const groqModels = [
-        'llama-3.1-8b-instant',
-        'openai/gpt-oss-20b',
-        'llama3-8b-8192',
-      ];
-
-      let lastGroqErr = '';
-
-      for (const model of groqModels) {
-        const groqRes = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${cleanKey}`,
-          },
-          body: JSON.stringify({
-            model,
-            messages,
-            temperature: 0.7,
-            max_tokens: 300,
-          }),
+      // 1. Fetch currently active models from Groq for this key
+      let chosenModel = 'qwen/qwen3.8-27b';
+      try {
+        const modelsRes = await fetch('https://api.groq.com/openai/v1/models', {
+          headers: { Authorization: `Bearer ${cleanKey}` },
         });
 
-        if (!groqRes.ok) {
-          lastGroqErr = await groqRes.text();
-          continue;
-        }
+        if (modelsRes.ok) {
+          const list = await modelsRes.json();
+          const validModels = (list.data || [])
+            .map((m: { id: string }) => m.id)
+            .filter(
+              (id: string) =>
+                !id.includes('whisper') &&
+                !id.includes('tts') &&
+                !id.includes('guard') &&
+                !id.includes('8192') // Exclude decommissioned legacy models
+            );
 
-        const groqData = await groqRes.json();
-        const rawText = groqData.choices?.[0]?.message?.content || '';
-        if (rawText) {
-          return NextResponse.json({ rawText });
+          if (validModels.length > 0) {
+            // Prioritize Qwen / GPT-OSS / Llama models
+            chosenModel =
+              validModels.find(
+                (id: string) =>
+                  id.includes('qwen') || id.includes('gpt-oss') || id.includes('instant')
+              ) || validModels[0];
+          }
         }
+      } catch (e) {
+        console.warn('Groq model lookup failed, using safe fallback', e);
       }
 
-      return NextResponse.json({ error: `Groq error: ${lastGroqErr}` }, { status: 500 });
+      // 2. Clean conversation history (no empty messages, no broken roles)
+      const cleanMessages: { role: 'system' | 'user' | 'assistant'; content: string }[] = [
+        { role: 'system', content: systemInstruction },
+      ];
+
+      for (const m of (history || []).slice(-6)) {
+        if (!m.text || m.text.includes('TrackDeck Copilot ready')) continue;
+        const role = m.role === 'model' ? 'assistant' : 'user';
+        if (cleanMessages.length === 1 && role !== 'user') continue;
+        cleanMessages.push({ role, content: m.text });
+      }
+
+      cleanMessages.push({ role: 'user', content: prompt });
+
+      const groqRes = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${cleanKey}`,
+        },
+        body: JSON.stringify({
+          model: chosenModel,
+          messages: cleanMessages,
+          temperature: 0.7,
+          max_tokens: 300,
+        }),
+      });
+
+      if (!groqRes.ok) {
+        const errText = await groqRes.text();
+        return NextResponse.json({ error: `Groq error: ${errText}` }, { status: 500 });
+      }
+
+      const groqData = await groqRes.json();
+      const rawText = groqData.choices?.[0]?.message?.content || '';
+      return NextResponse.json({ rawText });
     }
 
     // ----------------------------------------------------
     // ENGINE B: GOOGLE GEMINI FALLBACK
     // ----------------------------------------------------
-    const conversation: { role: 'user' | 'model'; parts: { text: string }[] }[] = [];
-    const rawHistory = Array.isArray(history) ? history : [];
-
-    for (const msg of rawHistory) {
-      if (msg.text?.includes('TrackDeck Copilot ready')) continue;
-      if (!msg.text?.trim()) continue;
-
-      const role = msg.role === 'model' ? 'model' : 'user';
-      if (conversation.length === 0 && role !== 'user') continue;
-
-      if (conversation.length > 0 && conversation[conversation.length - 1].role === role) {
-        conversation[conversation.length - 1].parts[0].text += `\n${msg.text}`;
-      } else {
-        conversation.push({ role, parts: [{ text: msg.text }] });
-      }
-    }
-
-    if (conversation.length > 0 && conversation[conversation.length - 1].role === 'user') {
-      conversation[conversation.length - 1].parts[0].text += `\n${prompt}`;
-    } else {
-      conversation.push({ role: 'user', parts: [{ text: prompt }] });
-    }
-
-    const geminiRes = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent?key=${cleanKey}`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          systemInstruction: { parts: [{ text: systemInstruction }] },
-          contents: conversation,
-          generationConfig: {
-            temperature: 0.7,
-            maxOutputTokens: 300,
-            thinkingConfig: { thinkingBudget: 0 },
-          },
-        }),
-      }
+    return NextResponse.json(
+      { error: 'Please enter a valid Groq API key starting with gsk_' },
+      { status: 400 }
     );
-
-    if (!geminiRes.ok) {
-      const errText = await geminiRes.text();
-      return NextResponse.json({ error: `Google API Error: ${errText}` }, { status: geminiRes.status });
-    }
-
-    const geminiData = await geminiRes.json();
-    const rawText = geminiData.candidates?.[0]?.content?.parts?.[0]?.text || '';
-    return NextResponse.json({ rawText });
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : 'Internal server error';
     return NextResponse.json({ error: message }, { status: 500 });
