@@ -32,68 +32,72 @@ Rules:
 - Never output markdown backticks around the <<<ACTION>>> tag.
 - Only include <<<ACTION>>> if the user gave an explicit command to change playback.`;
 
-    // Ensure conversation strictly starts with 'user' and alternates roles
-    const conversation: { role: 'user' | 'model'; parts: { text: string }[] }[] = [];
+    // Format clean conversation history
+    const formattedMessages: { role: 'system' | 'user' | 'assistant'; content: string }[] = [
+      { role: 'system', content: systemInstruction },
+    ];
 
     const rawHistory = Array.isArray(history) ? history : [];
-    for (const msg of rawHistory) {
+    for (const msg of rawHistory.slice(-6)) {
       if (msg.text?.includes('TrackDeck Copilot ready')) continue;
       if (!msg.text?.trim()) continue;
-
-      const role = msg.role === 'model' ? 'model' : 'user';
-
-      if (conversation.length === 0 && role !== 'user') continue;
-
-      if (conversation.length > 0 && conversation[conversation.length - 1].role === role) {
-        conversation[conversation.length - 1].parts[0].text += `\n${msg.text}`;
-      } else {
-        conversation.push({ role, parts: [{ text: msg.text }] });
-      }
+      formattedMessages.push({
+        role: msg.role === 'model' ? 'assistant' : 'user',
+        content: msg.text,
+      });
     }
 
-    if (conversation.length > 0 && conversation[conversation.length - 1].role === 'user') {
-      conversation[conversation.length - 1].parts[0].text += `\n${prompt}`;
-    } else {
-      conversation.push({ role: 'user', parts: [{ text: prompt }] });
-    }
+    formattedMessages.push({
+      role: 'user',
+      content: prompt,
+    });
 
-    // Google's active models for new keys
     const modelsToTry = [
       'gemini-3.8-flash',
-      'gemini-3.5-flash',
       'gemini-flash-latest',
     ];
 
     let lastError = '';
 
     for (const model of modelsToTry) {
-      const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`;
+      // 10-second abort controller so Vercel never hangs on 504
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 10000);
 
-      const res = await fetch(url, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-goog-api-key': cleanKey,
-        },
-        body: JSON.stringify({
-          systemInstruction: { parts: [{ text: systemInstruction }] },
-          contents: conversation,
-          generationConfig: {
-            temperature: 0.7,
-            maxOutputTokens: 500,
-          },
-        }),
-      });
+      try {
+        const res = await fetch(
+          'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions',
+          {
+            method: 'POST',
+            signal: controller.signal,
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${cleanKey}`,
+            },
+            body: JSON.stringify({
+              model,
+              messages: formattedMessages,
+              max_tokens: 300,
+              temperature: 0.7,
+            }),
+          }
+        );
 
-      if (!res.ok) {
-        lastError = await res.text();
-        continue;
-      }
+        clearTimeout(timeoutId);
 
-      const data = await res.json();
-      const rawText = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
-      if (rawText) {
-        return NextResponse.json({ rawText });
+        if (!res.ok) {
+          lastError = await res.text();
+          continue;
+        }
+
+        const data = await res.json();
+        const rawText = data.choices?.[0]?.message?.content || '';
+        if (rawText) {
+          return NextResponse.json({ rawText });
+        }
+      } catch (err: unknown) {
+        clearTimeout(timeoutId);
+        lastError = err instanceof Error ? err.message : 'Request timeout';
       }
     }
 
