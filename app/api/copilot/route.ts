@@ -18,9 +18,12 @@ export async function POST(req: NextRequest) {
       ? `Current playing track: "${currentTrackInfo.name}" by ${currentTrackInfo.artist} (Album: ${currentTrackInfo.album}). Status: ${currentTrackInfo.isPlaying ? 'Playing' : 'Paused'}.`
       : `No track is currently playing.`;
 
-    const systemInstruction = `You are TrackDeck's AI Music Companion. You are an expert music nerd, encyclopedic crate-digger, and friendly co-listener.
+    const systemInstruction = `You are TrackDeck's AI Music Companion: an elite music nerd, crate-digger, and audio production connoisseur with deep knowledge of hip-hop, trap, underground rap (Opium, Rage, Pluggnb), classic vinyl, and electronic music.
+
 You have two jobs:
-1. Converse naturally, enthusiastically, and insightfully about music, artists, genres, album histories, production styles, and recommendations.
+1. Converse insightfully and concisely about music, beats, sound design, sample origins, and producer credits (e.g. Madlib, Metro Boomin, Pierre Bourne, BNYX, F1LTHY, Brandon Finessin, Star Boy, Outtatown, TM88). 
+- If you know the producer or sample for the current track, name them immediately and explain how they made the beat.
+- If it's a brand new release or underground leak and you don't have the exact liner notes, do NOT just say you don't know—break down the sonic style (e.g. 808 distortion, synth presets, hi-hat rolls) and name who that artist frequently collaborates with in that album era.
 2. If the user explicitly asks to control playback (e.g. skip, pause, play something, search a song), append a special JSON action tag at the very end of your response formatted exactly like this:
 <<<ACTION:{"type":"next"|"pause"|"play"|"search_play","query":"song or artist or empty"}>>>
 
@@ -28,16 +31,16 @@ Context:
 ${trackContext}
 
 Rules:
-- Keep conversational replies concise, stylish, and engaging (1-3 sentences max).
+- Keep answers punchy, knowledgeable, and stylish (2-3 sentences max).
 - Never output markdown backticks around the <<<ACTION>>> tag.
 - Only include <<<ACTION>>> if the user gave an explicit command to change playback.`;
 
     // ----------------------------------------------------
-    // ENGINE A: GROQ (Dynamic Live Model Discovery)
+    // ENGINE A: GROQ (Prioritize 120B / Largest Model)
     // ----------------------------------------------------
     if (cleanKey.startsWith('gsk_')) {
-      // 1. Fetch currently active models from Groq for this key
-      let chosenModel = 'qwen/qwen3.8-27b';
+      let chosenModel = 'openai/gpt-oss-120b';
+
       try {
         const modelsRes = await fetch('https://api.groq.com/openai/v1/models', {
           headers: { Authorization: `Bearer ${cleanKey}` },
@@ -52,23 +55,22 @@ Rules:
                 !id.includes('whisper') &&
                 !id.includes('tts') &&
                 !id.includes('guard') &&
-                !id.includes('8192') // Exclude decommissioned legacy models
+                !id.includes('8192')
             );
 
           if (validModels.length > 0) {
-            // Prioritize Qwen / GPT-OSS / Llama models
+            // Prioritize the smartest / highest parameter models available
             chosenModel =
-              validModels.find(
-                (id: string) =>
-                  id.includes('qwen') || id.includes('gpt-oss') || id.includes('instant')
-              ) || validModels[0];
+              validModels.find((id: string) => id.includes('120b')) ||
+              validModels.find((id: string) => id.includes('qwen3.8')) ||
+              validModels.find((id: string) => id.includes('70b')) ||
+              validModels[0];
           }
         }
       } catch (e) {
-        console.warn('Groq model lookup failed, using safe fallback', e);
+        console.warn('Groq model lookup failed, using 120b', e);
       }
 
-      // 2. Clean conversation history (no empty messages, no broken roles)
       const cleanMessages: { role: 'system' | 'user' | 'assistant'; content: string }[] = [
         { role: 'system', content: systemInstruction },
       ];
@@ -106,9 +108,6 @@ Rules:
       return NextResponse.json({ rawText });
     }
 
-    // ----------------------------------------------------
-    // ENGINE B: GOOGLE GEMINI FALLBACK
-    // ----------------------------------------------------
     return NextResponse.json(
       { error: 'Please enter a valid Groq API key starting with gsk_' },
       { status: 400 }
