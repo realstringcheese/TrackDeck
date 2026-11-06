@@ -29,16 +29,15 @@ You MUST reply with a raw JSON object matching this exact schema:
 }
 
 Command rules:
-- If user wants to hear music (e.g. "play Silly Watch by Uzi", "play some Carti", "put on Drake"): set command="play" and query="Silly Watch Lil Uzi Vert" (or artist name).
-- If user wants to queue: set command="queue" and query="song name".
-- If user wants to skip: set command="next" and query=null.
-- If user wants to pause: set command="pause" and query=null.
-- If user wants to resume: set command="play" and query=null.
-- If user is just chatting, asking trivia, or asking who produced a song: set command=null and query=null.
+- RESUMING/UNPAUSING: If user says 'play', 'unpause', 'resume', 'keep playing', set command="play" and query=null. NEVER search for the word 'play' or 'unpause'!
+- PLAYING SPECIFIC MUSIC: If user asks for music (e.g. 'play Silly Watch by Uzi', 'play some Carti', 'put on Drake'), set command="play" and query="Silly Watch Lil Uzi Vert".
+- QUEUING: set command="queue" and query="song name".
+- SKIPPING: set command="next" and query=null.
+- PAUSING: set command="pause" and query=null.
+- CHATTING/TRIVIA: set command=null and query=null.
 
 Reply with valid JSON only.`;
 
-    // 1. DYNAMIC MODEL DISCOVERY: Find the active free model on this key
     let targetModel = 'openai/gpt-oss-120b';
 
     try {

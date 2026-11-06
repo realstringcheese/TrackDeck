@@ -19,6 +19,10 @@ import {
   X,
   Send,
   ExternalLink,
+  Smartphone,
+  Laptop,
+  Speaker,
+  Radio,
 } from 'lucide-react';
 import { getAccessToken, spotifyFetch, redirectToSpotifyAuth, SpotifyAPI } from '@/lib/spotify';
 import { askGemini, ChatMessage, CopilotResponse } from '@/lib/gemini';
@@ -40,12 +44,21 @@ interface TrackItem {
   uri: string;
 }
 
+interface SpotifyDevice {
+  id: string;
+  name: string;
+  type: string;
+  is_active: boolean;
+  volume_percent?: number;
+}
+
 export default function HomePage() {
   const [theme, setTheme] = useState<'dark' | 'light'>('dark');
   const [isAuthenticated, setIsAuthenticated] = useState<boolean | null>(null);
   const [spotifyClientId, setSpotifyClientId] = useState('');
   const [showSpotifyModal, setShowSpotifyModal] = useState(false);
   const [showSettingsModal, setShowSettingsModal] = useState(false);
+  const [showDevicesModal, setShowDevicesModal] = useState(false);
 
   // Key
   const [geminiKey, setGeminiKey] = useState<string>('');
@@ -64,6 +77,8 @@ export default function HomePage() {
     lastSyncTime: number;
   } | null>(null);
 
+  // Devices (Spotify Connect)
+  const [devices, setDevices] = useState<SpotifyDevice[]>([]);
   const activeDeviceId = useRef<string | null>(null);
   const isActionPending = useRef(false);
 
@@ -113,6 +128,7 @@ export default function HomePage() {
         fetchNowPlaying();
         loadPlaylists();
         loadQueue();
+        loadDevices();
       } else {
         setIsAuthenticated(false);
         setShowSpotifyModal(true);
@@ -160,19 +176,36 @@ export default function HomePage() {
     chatBottomRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
-  // Target Device Resolver
-  async function resolveTargetDevice(): Promise<string | undefined> {
+  // Load Devices
+  async function loadDevices() {
     try {
-      const data = await spotifyFetch('/me/player/devices');
-      const devices = data?.devices || [];
-      const active = devices.find((d: { is_active: boolean }) => d.is_active);
-      const target = active || devices[0];
-      if (target?.id) {
-        activeDeviceId.current = target.id;
-        return target.id;
+      const data = await SpotifyAPI.getDevices();
+      if (data?.devices && Array.isArray(data.devices)) {
+        setDevices(data.devices);
+        const active = data.devices.find((d: SpotifyDevice) => d.is_active);
+        if (active?.id) activeDeviceId.current = active.id;
       }
-    } catch {}
-    return activeDeviceId.current || undefined;
+    } catch (e) {
+      console.warn('Failed to load devices', e);
+    }
+  }
+
+  // Switch or Wake Up Device
+  async function handleTransferDevice(devId: string) {
+    try {
+      isActionPending.current = true;
+      activeDeviceId.current = devId;
+      await SpotifyAPI.transferPlayback(devId, true);
+      setShowDevicesModal(false);
+      setTimeout(() => {
+        isActionPending.current = false;
+        fetchNowPlaying();
+        loadDevices();
+      }, 800);
+    } catch (e) {
+      console.warn('Failed to transfer playback', e);
+      isActionPending.current = false;
+    }
   }
 
   async function loadPlaylists() {
@@ -275,20 +308,25 @@ export default function HomePage() {
   }
 
   // ==========================================================
-  // DIRECT 1-TO-1 SPOTIFY EXECUTION
+  // COPILOT COMMAND EXECUTION (CLEAN, NO WEIRD "PLAY" SEARCHES)
   // ==========================================================
-  async function executeCopilotCommand(copilot: CopilotResponse): Promise<string | undefined> {
+  async function executeCopilotCommand(copilot: CopilotResponse) {
     const { command, query } = copilot;
-    if (!command) return undefined;
+    if (!command) return;
 
     isActionPending.current = true;
-    const deviceId = await resolveTargetDevice();
+    const deviceId = activeDeviceId.current || undefined;
     const devParam = deviceId ? `?device_id=${deviceId}` : '';
 
     try {
       if (command === 'play') {
-        // If a query was provided, search and play that track
-        if (query) {
+        // Guard against AI searching for words like "play", "music", "song"
+        const isGeneric =
+          !query ||
+          /^(play|music|song|the song|it|unpause|resume|track)$/i.test(query.trim());
+
+        if (!isGeneric && query) {
+          // Real search query
           const searchRes = await spotifyFetch(
             `/search?q=${encodeURIComponent(query)}&type=track&limit=5`
           );
@@ -296,17 +334,10 @@ export default function HomePage() {
 
           if (track?.uri) {
             await SpotifyAPI.playUri(undefined, [track.uri], deviceId);
-            setTimeout(() => {
-              fetchNowPlaying();
-              loadQueue();
-            }, 600);
-            return `Playing: ${track.name} - ${track.artists?.[0]?.name || ''}`;
           }
-          return `No track found for "${query}"`;
         } else {
-          // No query: resume
+          // Just resume playback!
           await spotifyFetch(`/me/player/play${devParam}`, { method: 'PUT' });
-          return 'Resumed';
         }
       }
 
@@ -319,28 +350,22 @@ export default function HomePage() {
         if (track?.uri) {
           await SpotifyAPI.addToQueue(track.uri);
           setQueue((prev) => [track, ...prev]);
-          return `Queued: ${track.name}`;
         }
-        return `No track found to queue for "${query}"`;
       }
 
       if (command === 'next') {
         await spotifyFetch(`/me/player/next${devParam}`, { method: 'POST' });
-        return 'Skipped';
       }
 
       if (command === 'pause') {
         await spotifyFetch(`/me/player/pause${devParam}`, { method: 'PUT' });
-        return 'Paused';
       }
 
       if (command === 'prev') {
         await spotifyFetch(`/me/player/previous${devParam}`, { method: 'POST' });
-        return 'Previous track';
       }
     } catch (e) {
       console.error('Command execution failed', e);
-      return 'Command failed';
     } finally {
       setTimeout(() => {
         isActionPending.current = false;
@@ -348,16 +373,13 @@ export default function HomePage() {
         loadQueue();
       }, 700);
     }
-
-    return undefined;
   }
 
   // Media Controls
   async function togglePlay() {
     if (!playback) return;
     const targetState = !playback.isPlaying;
-    const deviceId = await resolveTargetDevice();
-    const devParam = deviceId ? `?device_id=${deviceId}` : '';
+    const devParam = activeDeviceId.current ? `?device_id=${activeDeviceId.current}` : '';
     isActionPending.current = true;
     setPlayback((prev) => (prev ? { ...prev, isPlaying: targetState, lastSyncTime: Date.now() } : null));
 
@@ -373,8 +395,7 @@ export default function HomePage() {
 
   async function handleNext() {
     isActionPending.current = true;
-    const deviceId = await resolveTargetDevice();
-    const devParam = deviceId ? `?device_id=${deviceId}` : '';
+    const devParam = activeDeviceId.current ? `?device_id=${activeDeviceId.current}` : '';
     try {
       await spotifyFetch(`/me/player/next${devParam}`, { method: 'POST' });
     } finally {
@@ -388,8 +409,7 @@ export default function HomePage() {
 
   async function handlePrev() {
     isActionPending.current = true;
-    const deviceId = await resolveTargetDevice();
-    const devParam = deviceId ? `?device_id=${deviceId}` : '';
+    const devParam = activeDeviceId.current ? `?device_id=${activeDeviceId.current}` : '';
     try {
       await spotifyFetch(`/me/player/previous${devParam}`, { method: 'POST' });
     } finally {
@@ -405,8 +425,7 @@ export default function HomePage() {
     const rect = e.currentTarget.getBoundingClientRect();
     const ratio = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
     const newPosMs = Math.floor(ratio * playback.durationMs);
-    const deviceId = await resolveTargetDevice();
-    const devParam = deviceId ? `?device_id=${deviceId}` : '';
+    const devParam = activeDeviceId.current ? `?device_id=${activeDeviceId.current}` : '';
 
     isActionPending.current = true;
     setPlayback((prev) => (prev ? { ...prev, progressMs: newPosMs, lastSyncTime: Date.now() } : null));
@@ -423,8 +442,7 @@ export default function HomePage() {
 
   async function handlePlayTrack(trackUri: string) {
     if (!trackUri) return;
-    const deviceId = await resolveTargetDevice();
-    await SpotifyAPI.playUri(undefined, [trackUri], deviceId);
+    await SpotifyAPI.playUri(undefined, [trackUri], activeDeviceId.current || undefined);
     setTimeout(() => {
       fetchNowPlaying();
       loadQueue();
@@ -440,8 +458,7 @@ export default function HomePage() {
 
   async function handlePlayPlaylist(playlistUri: string) {
     if (!playlistUri) return;
-    const deviceId = await resolveTargetDevice();
-    await SpotifyAPI.playUri(playlistUri, undefined, deviceId);
+    await SpotifyAPI.playUri(playlistUri, undefined, activeDeviceId.current || undefined);
     setTimeout(() => {
       fetchNowPlaying();
       loadQueue();
@@ -481,18 +498,18 @@ export default function HomePage() {
 
     try {
       const response = await askGemini(textToSend, messages, geminiKey, playback);
-      let executedActionSummary: string | undefined = undefined;
 
+      // Execute action directly
       if (response.command) {
-        executedActionSummary = await executeCopilotCommand(response);
+        executeCopilotCommand(response);
       }
 
+      // Display clean message without any green error badge
       setMessages((prev) => [
         ...prev,
         {
           role: 'model',
           text: response.message,
-          actionTaken: executedActionSummary,
         },
       ]);
     } catch (err: unknown) {
@@ -554,7 +571,8 @@ export default function HomePage() {
             : 'border-zinc-200/80 bg-white/80 text-zinc-900'
         }`}
       >
-        <div className="flex items-center">
+        <div className="flex items-center gap-2">
+          {/* AI Status */}
           <button
             onClick={() => setShowSettingsModal(true)}
             className={`text-[11px] font-medium px-3 py-1 rounded-full border transition-all flex items-center gap-1.5 ${
@@ -569,6 +587,25 @@ export default function HomePage() {
           >
             <Sparkles className={`w-3 h-3 ${geminiKey ? 'text-emerald-500' : 'text-zinc-400'}`} />
             <span>{geminiKey ? 'Copilot Active' : 'Connect AI'}</span>
+          </button>
+
+          {/* SPOTIFY CONNECT DEVICE SWITCHER PILL */}
+          <button
+            onClick={() => {
+              loadDevices();
+              setShowDevicesModal(true);
+            }}
+            className={`text-[11px] font-medium px-3 py-1 rounded-full border transition-all flex items-center gap-1.5 ${
+              isDark
+                ? 'bg-white/[0.04] border-white/10 text-zinc-300 hover:bg-white/[0.08] hover:text-white'
+                : 'bg-zinc-100 border-zinc-200 text-zinc-700 hover:bg-zinc-200'
+            }`}
+            title="Switch or Wake Device"
+          >
+            <Smartphone className="w-3 h-3 text-emerald-500" />
+            <span className="truncate max-w-[130px]">
+              {playback?.device || 'Select Device'}
+            </span>
           </button>
         </div>
 
@@ -756,9 +793,17 @@ export default function HomePage() {
                     className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-105"
                   />
                 ) : (
-                  <div className="flex flex-col items-center gap-2 opacity-50 p-4">
+                  <div className="flex flex-col items-center gap-2 opacity-60 p-4">
                     <Music2 className="w-12 h-12 stroke-[1.2]" />
-                    <p className="text-xs">Spotify is Idle</p>
+                    <p className="text-xs font-semibold">Spotify is Idle</p>
+                    {devices.length > 0 && (
+                      <button
+                        onClick={() => handleTransferDevice(devices[0].id)}
+                        className="mt-2 px-3 py-1 bg-emerald-500 hover:bg-emerald-400 text-black text-[11px] font-bold rounded-full transition-all"
+                      >
+                        Wake Up {devices[0].name}
+                      </button>
+                    )}
                   </div>
                 )}
               </div>
@@ -769,7 +814,7 @@ export default function HomePage() {
                   {playback?.name || 'Awaiting Track...'}
                 </h2>
                 <p className="text-xs font-medium opacity-60 truncate">
-                  {playback?.artist || 'Open Spotify on phone to spin'}
+                  {playback?.artist || 'Ready to spin'}
                 </p>
               </div>
 
@@ -824,7 +869,7 @@ export default function HomePage() {
             </div>
           </div>
 
-          {/* LOWER DECK: CHAT */}
+          {/* LOWER DECK: CLEAN CHAT (NO ERROR BADGES) */}
           <div
             className={`w-full max-w-3xl mx-auto h-[20vh] border rounded-2xl backdrop-blur-2xl flex flex-col justify-between p-3 shrink-0 shadow-lg transition-colors ${
               isDark
@@ -849,11 +894,6 @@ export default function HomePage() {
                   >
                     {m.text}
                   </div>
-                  {m.actionTaken && (
-                    <span className="mt-1 text-[10px] font-mono text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-2 py-0.5 rounded-full">
-                      ⚡ {m.actionTaken}
-                    </span>
-                  )}
                 </div>
               ))}
               {isAiLoading && (
@@ -869,7 +909,7 @@ export default function HomePage() {
                 type="text"
                 value={chatInput}
                 onChange={(e) => setChatInput(e.target.value)}
-                placeholder="Try: 'play Silly Watch by Lil Uzi Vert', 'skip', or ask who produced this..."
+                placeholder="Ask music trivia, say 'play Silly Watch by Lil Uzi Vert', or 'unpause'..."
                 className={`flex-1 border rounded-xl px-3.5 py-2 text-xs focus:outline-none transition-colors ${
                   isDark
                     ? 'bg-white/[0.03] border-white/10 text-white placeholder:text-zinc-500 focus:border-emerald-500/60'
@@ -941,6 +981,104 @@ export default function HomePage() {
           </div>
         </aside>
       </div>
+
+      {/* ======================================================== */}
+      {/* SPOTIFY CONNECT DEVICE SWITCHER MODAL                     */}
+      {/* ======================================================== */}
+      {showDevicesModal && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex items-center justify-center p-4">
+          <div
+            className={`w-full max-w-md rounded-3xl p-6 shadow-2xl space-y-5 border transition-colors ${
+              isDark ? 'bg-[#0e1017] border-white/10 text-white' : 'bg-white border-zinc-200 text-zinc-900'
+            }`}
+          >
+            <div className={`flex items-center justify-between border-b pb-3 ${isDark ? 'border-white/[0.08]' : 'border-zinc-200'}`}>
+              <div className="flex items-center gap-2">
+                <Radio className="w-4 h-4 text-emerald-500" />
+                <h3 className="font-bold text-sm">Spotify Connect Devices</h3>
+              </div>
+              <button
+                onClick={() => setShowDevicesModal(false)}
+                className="opacity-50 hover:opacity-100 p-1"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <p className="text-xs opacity-60 leading-relaxed">
+              Select which device receives the audio stream. Tap any device below to wake it up and resume playback remotely.
+            </p>
+
+            {/* Device List */}
+            <div className="space-y-2 max-h-60 overflow-y-auto">
+              {devices.length === 0 ? (
+                <div className="p-4 text-center text-xs opacity-50 space-y-2">
+                  <p>No active Spotify devices found.</p>
+                  <p className="text-[11px] opacity-40">Open Spotify on your phone or PC to wake it up.</p>
+                </div>
+              ) : (
+                devices.map((d) => (
+                  <div
+                    key={d.id}
+                    className={`flex items-center justify-between p-3 rounded-2xl border transition-all ${
+                      d.is_active
+                        ? isDark
+                          ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300'
+                          : 'bg-emerald-50 border-emerald-300 text-emerald-800'
+                        : isDark
+                        ? 'bg-white/[0.03] border-white/[0.06] hover:bg-white/[0.07]'
+                        : 'bg-zinc-50 border-zinc-200 hover:bg-zinc-100'
+                    }`}
+                  >
+                    <div className="flex items-center gap-3">
+                      {d.type.toLowerCase() === 'smartphone' ? (
+                        <Smartphone className="w-5 h-5 text-emerald-500" />
+                      ) : d.type.toLowerCase() === 'speaker' ? (
+                        <Speaker className="w-5 h-5 text-emerald-500" />
+                      ) : (
+                        <Laptop className="w-5 h-5 text-emerald-500" />
+                      )}
+                      <div>
+                        <p className="font-semibold text-xs flex items-center gap-2">
+                          {d.name}
+                          {d.is_active && (
+                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                          )}
+                        </p>
+                        <p className="text-[10px] opacity-60 capitalize">{d.type}</p>
+                      </div>
+                    </div>
+
+                    {!d.is_active && (
+                      <button
+                        onClick={() => handleTransferDevice(d.id)}
+                        className="px-3 py-1 bg-emerald-500 hover:bg-emerald-400 text-black text-[11px] font-bold rounded-xl transition-all shadow-sm"
+                      >
+                        Play Here
+                      </button>
+                    )}
+                  </div>
+                ))
+              )}
+            </div>
+
+            <div className="flex justify-between items-center pt-2 border-t border-inherit">
+              <button
+                onClick={loadDevices}
+                className="text-xs text-emerald-500 hover:underline flex items-center gap-1.5"
+              >
+                <RefreshCw className="w-3 h-3" /> Refresh Device List
+              </button>
+              <button
+                onClick={() => setShowDevicesModal(false)}
+                className="px-4 py-1.5 text-xs opacity-60 hover:opacity-100"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* SETTINGS MODAL */}
       {showSettingsModal && (

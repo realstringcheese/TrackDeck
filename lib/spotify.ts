@@ -1,4 +1,4 @@
-// Spotify PKCE, Playlists & Queue Client
+// Spotify PKCE, Playlists, Queue & Devices Client
 
 const CLIENT_ID = process.env.NEXT_PUBLIC_SPOTIFY_CLIENT_ID || '';
 const SCOPES = [
@@ -113,9 +113,8 @@ export async function spotifyFetch(endpoint: string, options: RequestInit = {}) 
     },
   });
 
-  if (res.status === 204) return null;
+  if (res.status === 204) return { success: true };
 
-  // Print exact error to console instead of hiding it
   if (!res.ok) {
     const errText = await res.text();
     console.warn(`Spotify API [${res.status}] on ${endpoint}:`, errText);
@@ -130,6 +129,12 @@ export const SpotifyAPI = {
   getPlaylistTracks: (playlistId: string) => spotifyFetch(`/playlists/${playlistId}/tracks?limit=50`),
   getQueue: () => spotifyFetch('/me/player/queue'),
   addToQueue: (uri: string) => spotifyFetch(`/me/player/queue?uri=${encodeURIComponent(uri)}`, { method: 'POST' }),
+  getDevices: () => spotifyFetch('/me/player/devices'),
+  transferPlayback: (deviceId: string, play: boolean = true) =>
+    spotifyFetch('/me/player', {
+      method: 'PUT',
+      body: JSON.stringify({ device_ids: [deviceId], play }),
+    }),
   playUri: (contextUri?: string, uris?: string[], deviceId?: string) => {
     const devParam = deviceId ? `?device_id=${deviceId}` : '';
     const body: { context_uri?: string; uris?: string[] } = {};
