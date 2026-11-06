@@ -47,30 +47,28 @@ export default function HomePage() {
     progressMs: number;
     durationMs: number;
     device?: string;
+    lastSyncTime: number;
   } | null>(null);
 
   // Volume State
   const [volume, setVolume] = useState<number>(70);
   const [prevVolume, setPrevVolume] = useState<number>(70);
   const volumeDebounceTimer = useRef<NodeJS.Timeout | null>(null);
-
-  // Cooldown Lock: prevents background polls from overwriting user clicks
-  const pollLockUntil = useRef<number>(0);
+  const isActionPending = useRef(false);
 
   // Chat State
   const [messages, setMessages] = useState<ChatMessage[]>([
     {
       role: 'model',
-      text: 'Yo! I’m your TrackDeck co-pilot. Ask me anything about your music, ask about samples, or click a vibe chip below to switch up the tracks.',
+      text: 'Yo! I’m your TrackDeck co-pilot. I am locked in with your Spotify in real-time. Ask me anything or tap a vibe chip below.',
     },
   ]);
   const [chatInput, setChatInput] = useState('');
   const [isAiLoading, setIsAiLoading] = useState(false);
-  const [isSkipping, setIsSkipping] = useState(false);
 
   const chatBottomRef = useRef<HTMLDivElement>(null);
 
-  // Initial load
+  // 1. Initial Load & Authentication
   useEffect(() => {
     const savedGeminiKey = localStorage.getItem('gemini_api_key') || '';
     setGeminiKey(savedGeminiKey);
@@ -82,16 +80,14 @@ export default function HomePage() {
       '';
     setSpotifyClientId(savedClientId);
 
-    // 1. Hydrate from cache immediately so player NEVER shows blank on load
     const cached = localStorage.getItem('trackdeck_cached_track');
     if (cached) {
       try {
         const parsed = JSON.parse(cached);
-        setPlayback({ ...parsed, isPlaying: false, device: 'Standby' });
+        setPlayback({ ...parsed, isPlaying: false, lastSyncTime: Date.now() });
       } catch {}
     }
 
-    // 2. Authenticate
     getAccessToken().then((token) => {
       if (token) {
         setIsAuthenticated(true);
@@ -103,23 +99,30 @@ export default function HomePage() {
     });
   }, []);
 
-  // Poll Spotify playback every 3 seconds for background updates
+  // 2. High-Frequency Real-Time Poller (Every 1.5 seconds)
   useEffect(() => {
     if (!isAuthenticated) return;
-    const interval = setInterval(fetchNowPlaying, 3000);
+    const interval = setInterval(fetchNowPlaying, 1500);
     return () => clearInterval(interval);
   }, [isAuthenticated]);
 
-  // Smooth local timer: advance the scrub bar every second without waiting for API
+  // 3. Smooth Sub-Second Progress Interpolator (Syncs directly with Phone timestamp)
   useEffect(() => {
     if (!playback?.isPlaying) return;
+
     const timer = setInterval(() => {
       setPlayback((prev) => {
         if (!prev || !prev.isPlaying) return prev;
-        const nextProgress = Math.min(prev.durationMs, prev.progressMs + 1000);
-        return { ...prev, progressMs: nextProgress };
+        const elapsedSinceSync = Date.now() - prev.lastSyncTime;
+        const currentProgress = Math.min(prev.durationMs, prev.progressMs + elapsedSinceSync);
+        return {
+          ...prev,
+          progressMs: currentProgress,
+          lastSyncTime: Date.now(),
+        };
       });
-    }, 1000);
+    }, 500);
+
     return () => clearInterval(timer);
   }, [playback?.isPlaying]);
 
@@ -127,111 +130,110 @@ export default function HomePage() {
     chatBottomRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
+  // --- CORE SPOTIFY SYNC FUNCTION ---
   async function fetchNowPlaying() {
-    // If the user just clicked a button, ignore background poll until Spotify server settles
-    if (Date.now() < pollLockUntil.current) return;
+    // If a button click on web is in flight, let it complete first
+    if (isActionPending.current) return;
 
     try {
       const data = await spotifyFetch('/me/player');
+
+      // Active track returned
       if (data && data.item) {
-        const liveTrack = {
-          name: data.item.name,
-          artist: data.item.artists.map((a: { name: string }) => a.name).join(', '),
-          album: data.item.album.name,
-          albumArt: data.item.album.images?.[0]?.url || '',
-          isPlaying: data.is_playing,
-          progressMs: data.progress_ms || 0,
-          durationMs: data.item.duration_ms || 1,
-          device: data.device?.name || 'Active Device',
-        };
-        setPlayback(liveTrack);
-        // Persist track to cache
-        localStorage.setItem('trackdeck_cached_track', JSON.stringify(liveTrack));
+        const serverProgress = data.progress_ms || 0;
+        const isPlaying = Boolean(data.is_playing);
+
+        setPlayback((prev) => {
+          // If song is unchanged and state is identical, don't trigger re-render
+          const sameTrack = prev?.name === data.item.name;
+          const sameState = prev?.isPlaying === isPlaying;
+
+          // If tracking smoothly, only adjust if drifted by more than 1.5s
+          if (sameTrack && sameState && prev) {
+            const drift = Math.abs(prev.progressMs - serverProgress);
+            return {
+              ...prev,
+              isPlaying,
+              progressMs: drift > 1500 ? serverProgress : prev.progressMs,
+              lastSyncTime: Date.now(),
+              device: data.device?.name || prev.device,
+            };
+          }
+
+          const freshTrack = {
+            name: data.item.name,
+            artist: data.item.artists.map((a: { name: string }) => a.name).join(', '),
+            album: data.item.album.name,
+            albumArt: data.item.album.images?.[0]?.url || '',
+            isPlaying,
+            progressMs: serverProgress,
+            durationMs: data.item.duration_ms || 1,
+            device: data.device?.name || 'Active Device',
+            lastSyncTime: Date.now(),
+          };
+
+          localStorage.setItem('trackdeck_cached_track', JSON.stringify(freshTrack));
+          return freshTrack;
+        });
 
         if (typeof data.device?.volume_percent === 'number') {
           setVolume(data.device.volume_percent);
         }
       } else {
-        // Spotify is closed/idle: keep current/cached track on screen, only mark paused
-        setPlayback((prev) => {
-          if (prev) {
-            return { ...prev, isPlaying: false, device: 'Standby (Open Spotify)' };
-          }
-          const cached = localStorage.getItem('trackdeck_cached_track');
-          if (cached) {
-            try {
-              const parsed = JSON.parse(cached);
-              return { ...parsed, isPlaying: false, device: 'Standby (Open Spotify)' };
-            } catch {}
-          }
-          return null;
-        });
+        // Spotify is momentarily buffering/idle: DO NOT BLANK OUT OR FLIP
+        // Only mark paused if currently marked playing
+        setPlayback((prev) => (prev ? { ...prev, isPlaying: false } : null));
       }
     } catch (e) {
-      console.warn('Failed to poll playback', e);
+      console.warn('Sync poll error', e);
     }
   }
 
-  // --- 0ms INSTANT OPTIMISTIC PLAY/PAUSE (WITH LOCK) ---
+  // --- ACTIONS (INSTANT + QUICK SYNC RECONCILIATION) ---
   async function togglePlay() {
     if (!playback) return;
-    const willPlay = !playback.isPlaying;
+    const targetState = !playback.isPlaying;
+    isActionPending.current = true;
 
-    // Lock background polling for 1.8 seconds so stale data doesn't override
-    pollLockUntil.current = Date.now() + 1800;
+    // Optimistic UI toggle
+    setPlayback((prev) => (prev ? { ...prev, isPlaying: targetState, lastSyncTime: Date.now() } : null));
 
-    // 1. Instant 0ms visual switch
-    setPlayback((prev) => (prev ? { ...prev, isPlaying: willPlay } : null));
-
-    // 2. Background Spotify API call
     try {
-      await spotifyFetch(willPlay ? '/me/player/play' : '/me/player/pause', {
+      await spotifyFetch(targetState ? '/me/player/play' : '/me/player/pause', {
         method: 'PUT',
       });
-    } catch {
-      // Revert if error occurs
-      pollLockUntil.current = 0;
-      setPlayback((prev) => (prev ? { ...prev, isPlaying: !willPlay } : null));
+    } finally {
+      setTimeout(() => {
+        isActionPending.current = false;
+        fetchNowPlaying();
+      }, 400);
     }
   }
 
-  // --- RESPONSIVE NEXT / PREV (WITH LOCK) ---
   async function handleNext() {
-    setIsSkipping(true);
-    pollLockUntil.current = Date.now() + 1500;
-
+    isActionPending.current = true;
     try {
       await spotifyFetch('/me/player/next', { method: 'POST' });
-      // Schedule single clean fetch right after lock expires
-      setTimeout(() => {
-        pollLockUntil.current = 0;
-        fetchNowPlaying();
-      }, 1200);
-    } catch {
-      pollLockUntil.current = 0;
     } finally {
-      setTimeout(() => setIsSkipping(false), 300);
+      setTimeout(() => {
+        isActionPending.current = false;
+        fetchNowPlaying();
+      }, 500);
     }
   }
 
   async function handlePrev() {
-    setIsSkipping(true);
-    pollLockUntil.current = Date.now() + 1500;
-
+    isActionPending.current = true;
     try {
       await spotifyFetch('/me/player/previous', { method: 'POST' });
-      setTimeout(() => {
-        pollLockUntil.current = 0;
-        fetchNowPlaying();
-      }, 1200);
-    } catch {
-      pollLockUntil.current = 0;
     } finally {
-      setTimeout(() => setIsSkipping(false), 300);
+      setTimeout(() => {
+        isActionPending.current = false;
+        fetchNowPlaying();
+      }, 500);
     }
   }
 
-  // --- CLICK-TO-SEEK PROGRESS BAR ---
   async function handleSeek(e: React.MouseEvent<HTMLDivElement>) {
     if (!playback) return;
     const rect = e.currentTarget.getBoundingClientRect();
@@ -239,21 +241,19 @@ export default function HomePage() {
     const ratio = Math.max(0, Math.min(1, clickX / rect.width));
     const newPosMs = Math.floor(ratio * playback.durationMs);
 
-    // Lock polling so scrub bar doesn't jump back
-    pollLockUntil.current = Date.now() + 1200;
+    isActionPending.current = true;
+    setPlayback((prev) => (prev ? { ...prev, progressMs: newPosMs, lastSyncTime: Date.now() } : null));
 
-    // Instant local jump
-    setPlayback((prev) => (prev ? { ...prev, progressMs: newPosMs } : null));
-
-    // Send seek to Spotify
-    await spotifyFetch(`/me/player/seek?position_ms=${newPosMs}`, { method: 'PUT' });
-    setTimeout(() => {
-      pollLockUntil.current = 0;
-      fetchNowPlaying();
-    }, 1000);
+    try {
+      await spotifyFetch(`/me/player/seek?position_ms=${newPosMs}`, { method: 'PUT' });
+    } finally {
+      setTimeout(() => {
+        isActionPending.current = false;
+        fetchNowPlaying();
+      }, 500);
+    }
   }
 
-  // --- SMOOTH VOLUME CONTROL ---
   function handleVolumeChange(e: React.ChangeEvent<HTMLInputElement>) {
     const newVol = parseInt(e.target.value, 10);
     setVolume(newVol);
@@ -302,7 +302,7 @@ export default function HomePage() {
     ]);
   }
 
-  // Chat Execution
+  // --- GEMINI CHAT HANDLER ---
   async function sendToGemini(textToSend: string) {
     if (!textToSend.trim() || isAiLoading) return;
 
@@ -320,12 +320,10 @@ export default function HomePage() {
       if (response.action) {
         if (response.action.type === 'next') handleNext();
         if (response.action.type === 'pause') {
-          pollLockUntil.current = Date.now() + 1800;
           setPlayback((p) => (p ? { ...p, isPlaying: false } : null));
           spotifyFetch('/me/player/pause', { method: 'PUT' });
         }
         if (response.action.type === 'play') {
-          pollLockUntil.current = Date.now() + 1800;
           setPlayback((p) => (p ? { ...p, isPlaying: true } : null));
           spotifyFetch('/me/player/play', { method: 'PUT' });
         }
@@ -335,15 +333,11 @@ export default function HomePage() {
           );
           const uri = search?.tracks?.items?.[0]?.uri || search?.playlists?.items?.[0]?.uri;
           if (uri) {
-            pollLockUntil.current = Date.now() + 2000;
             await spotifyFetch('/me/player/play', {
               method: 'PUT',
               body: JSON.stringify({ uris: [uri] }),
             });
-            setTimeout(() => {
-              pollLockUntil.current = 0;
-              fetchNowPlaying();
-            }, 1500);
+            setTimeout(fetchNowPlaying, 800);
           }
         }
       }
@@ -456,7 +450,6 @@ export default function HomePage() {
         
         {/* LEFT COLUMN: The Deck (Vinyl & Playback Showcase) */}
         <section className="lg:col-span-5 bg-gradient-to-b from-white/[0.06] to-white/[0.02] border border-white/[0.08] rounded-3xl p-7 flex flex-col justify-between backdrop-blur-2xl shadow-2xl relative overflow-hidden">
-          {/* Subtle Ambient Ring */}
           <div className="absolute -top-24 -left-24 w-60 h-60 bg-emerald-500/10 rounded-full blur-3xl pointer-events-none" />
 
           <div>
@@ -465,7 +458,7 @@ export default function HomePage() {
                 <Radio className="w-3.5 h-3.5 text-emerald-400" /> Living Player
               </span>
 
-              {/* Animated Equalizer when playing */}
+              {/* Animated Equalizer */}
               <div className="flex items-end gap-1 h-3.5">
                 <span className={`w-1 bg-emerald-400 rounded-full transition-all duration-300 ${playback?.isPlaying ? 'h-full animate-[bounce_1s_infinite]' : 'h-1 opacity-40'}`} />
                 <span className={`w-1 bg-emerald-400 rounded-full transition-all duration-300 ${playback?.isPlaying ? 'h-2/3 animate-[bounce_0.8s_infinite]' : 'h-1 opacity-40'}`} />
@@ -479,7 +472,7 @@ export default function HomePage() {
                 <img
                   src={playback.albumArt}
                   alt={playback.name}
-                  className={`w-full h-full object-cover transition-transform duration-700 group-hover:scale-105 ${isSkipping ? 'opacity-60 scale-95' : 'opacity-100'}`}
+                  className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-105"
                 />
               ) : (
                 <div className="flex flex-col items-center gap-3 text-zinc-500 p-6 text-center">
@@ -503,7 +496,7 @@ export default function HomePage() {
               )}
             </div>
 
-            {/* CLICKABLE Scrub Bar */}
+            {/* Sub-Second Clickable Scrub Bar */}
             <div className="space-y-1.5 mb-6">
               <div
                 onClick={handleSeek}
@@ -511,7 +504,7 @@ export default function HomePage() {
                 title="Click anywhere to jump"
               >
                 <div
-                  className="bg-gradient-to-r from-emerald-500 to-teal-400 h-full rounded-full transition-[width] duration-150 ease-linear"
+                  className="bg-gradient-to-r from-emerald-500 to-teal-400 h-full rounded-full transition-[width] duration-300 ease-linear"
                   style={{ width: `${progressPercent}%` }}
                 />
               </div>
@@ -523,7 +516,7 @@ export default function HomePage() {
           </div>
 
           <div>
-            {/* Media Dock Controls (0ms instant response) */}
+            {/* Controls */}
             <div className="flex items-center justify-center gap-6 mb-6">
               <button
                 onClick={handlePrev}
@@ -584,8 +577,6 @@ export default function HomePage() {
 
         {/* RIGHT COLUMN: AI Music Brain & Chat Terminal */}
         <section className="lg:col-span-7 bg-gradient-to-b from-white/[0.06] to-white/[0.02] border border-white/[0.08] rounded-3xl flex flex-col justify-between backdrop-blur-2xl shadow-2xl overflow-hidden min-h-[600px]">
-          
-          {/* Terminal Header */}
           <div className="px-6 py-4 border-b border-white/[0.06] bg-black/20 flex items-center justify-between">
             <div className="flex items-center gap-2.5">
               <div className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse" />
