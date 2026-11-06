@@ -29,16 +29,16 @@ import { askGemini, ChatMessage } from '@/lib/gemini';
 interface Playlist {
   id: string;
   name: string;
-  images: { url: string }[];
-  tracks: { total: number };
+  images?: { url: string }[];
+  tracks?: { total: number };
   uri: string;
 }
 
 interface TrackItem {
   id: string;
   name: string;
-  artists: { name: string }[];
-  album: { name: string; images: { url: string }[] };
+  artists?: { name: string }[];
+  album?: { name: string; images?: { url: string }[] };
   duration_ms: number;
   uri: string;
 }
@@ -166,11 +166,14 @@ export default function HomePage() {
     chatBottomRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
-  // Data Loaders
+  // Safe Spotify Data Loaders
   async function loadPlaylists() {
     try {
       const data = await SpotifyAPI.getPlaylists();
-      if (data?.items) setPlaylists(data.items);
+      if (data?.items && Array.isArray(data.items)) {
+        // Filter out null or broken items
+        setPlaylists(data.items.filter(Boolean));
+      }
     } catch (e) {
       console.warn('Failed to load playlists', e);
     }
@@ -179,24 +182,30 @@ export default function HomePage() {
   async function loadQueue() {
     try {
       const data = await SpotifyAPI.getQueue();
-      if (data?.queue) setQueue(data.queue.slice(0, 15));
+      if (data?.queue && Array.isArray(data.queue)) {
+        // Filter out null or broken items
+        setQueue(data.queue.filter(Boolean).slice(0, 15));
+      }
     } catch (e) {
       console.warn('Failed to load queue', e);
     }
   }
 
   async function openPlaylistInspector(playlist: Playlist) {
+    if (!playlist?.id) return;
     setSelectedPlaylist(playlist);
     setIsLoadingTracks(true);
     try {
       const data = await SpotifyAPI.getPlaylistTracks(playlist.id);
-      if (data?.items) {
+      if (data?.items && Array.isArray(data.items)) {
         setPlaylistTracks(
           data.items
-            .map((item: { track: TrackItem }) => item.track)
-            .filter((t: TrackItem | null) => t && t.id)
+            .map((item: { track?: TrackItem }) => item?.track)
+            .filter((t: TrackItem | null | undefined): t is TrackItem => Boolean(t && t.id && t.name))
         );
       }
+    } catch (e) {
+      console.warn('Failed to load playlist tracks', e);
     } finally {
       setIsLoadingTracks(false);
     }
@@ -209,6 +218,15 @@ export default function HomePage() {
       if (data && data.item) {
         const isPlaying = Boolean(data.is_playing);
         const serverProgress = data.progress_ms || 0;
+
+        // Safe artist extraction (handles podcasts/episodes without artists array)
+        const artistName = Array.isArray(data.item.artists)
+          ? data.item.artists.map((a: { name: string }) => a?.name).filter(Boolean).join(', ')
+          : data.item.show?.name || 'Unknown Artist';
+
+        const albumName = data.item.album?.name || data.item.show?.name || '';
+        const albumCover =
+          data.item.album?.images?.[0]?.url || data.item.show?.images?.[0]?.url || '';
 
         setPlayback((prev) => {
           const sameTrack = prev?.name === data.item.name;
@@ -226,10 +244,10 @@ export default function HomePage() {
           }
 
           const fresh = {
-            name: data.item.name,
-            artist: data.item.artists.map((a: { name: string }) => a.name).join(', '),
-            album: data.item.album.name,
-            albumArt: data.item.album.images?.[0]?.url || '',
+            name: data.item.name || 'Unknown Track',
+            artist: artistName,
+            album: albumName,
+            albumArt: albumCover,
             isPlaying,
             progressMs: serverProgress,
             durationMs: data.item.duration_ms || 1,
@@ -309,6 +327,7 @@ export default function HomePage() {
   }
 
   async function handlePlayTrack(trackUri: string) {
+    if (!trackUri) return;
     await SpotifyAPI.playUri(undefined, [trackUri]);
     setTimeout(() => {
       fetchNowPlaying();
@@ -317,12 +336,14 @@ export default function HomePage() {
   }
 
   async function handleAddToQueue(track: TrackItem) {
+    if (!track?.uri) return;
     await SpotifyAPI.addToQueue(track.uri);
     setQueue((prev) => [track, ...prev]);
     setTimeout(loadQueue, 800);
   }
 
   async function handlePlayPlaylist(playlistUri: string) {
+    if (!playlistUri) return;
     await SpotifyAPI.playUri(playlistUri);
     setTimeout(() => {
       fetchNowPlaying();
@@ -446,7 +467,7 @@ export default function HomePage() {
       )}
 
       {/* ======================================================== */}
-      {/* 1. TOP BAR (Thin, Clean, Darker/Lighter, Centered Logo)   */}
+      {/* 1. TOP BAR                                               */}
       {/* ======================================================== */}
       <header
         className={`relative z-30 h-12 border-b px-5 flex items-center justify-between shrink-0 backdrop-blur-2xl transition-colors duration-300 ${
@@ -455,7 +476,6 @@ export default function HomePage() {
             : 'border-zinc-200/80 bg-white/80 text-zinc-900'
         }`}
       >
-        {/* Left: AI Connectivity Status */}
         <div className="flex items-center">
           <button
             onClick={() => setShowSettingsModal(true)}
@@ -474,13 +494,11 @@ export default function HomePage() {
           </button>
         </div>
 
-        {/* Center: Brand & Logo */}
         <div className="flex items-center gap-2">
           <Disc3 className="w-4 h-4 text-emerald-500 animate-[spin_10s_linear_infinite]" />
           <h1 className="font-bold text-xs tracking-widest uppercase font-mono">TrackDeck</h1>
         </div>
 
-        {/* Right: Settings Gear & Account */}
         <div className="flex items-center gap-1">
           <button
             onClick={() => setShowSettingsModal(true)}
@@ -512,7 +530,7 @@ export default function HomePage() {
       <div className="relative z-10 flex-1 flex overflow-hidden">
         
         {/* -------------------------------------------------------- */}
-        {/* LEFT WING: PLAYLISTS (Substantial w-64 by default)       */}
+        {/* LEFT WING: PLAYLISTS                                     */}
         {/* -------------------------------------------------------- */}
         <aside
           className={`h-full w-64 border-r backdrop-blur-2xl flex flex-col shrink-0 overflow-hidden transition-colors duration-300 ${
@@ -521,7 +539,6 @@ export default function HomePage() {
               : 'border-zinc-200/80 bg-white/70 text-zinc-900 shadow-sm'
           }`}
         >
-          {/* Header */}
           <div
             className={`p-3.5 border-b flex items-center justify-between min-h-[44px] ${
               isDark ? 'border-white/[0.04]' : 'border-zinc-200/60'
@@ -544,7 +561,6 @@ export default function HomePage() {
             )}
           </div>
 
-          {/* List Content */}
           <div className="flex-1 overflow-y-auto p-2 space-y-1.5 no-scrollbar">
             {selectedPlaylist ? (
               /* Playlist Track Inspector */
@@ -552,11 +568,13 @@ export default function HomePage() {
                 <div className="text-center p-2">
                   <img
                     src={selectedPlaylist.images?.[0]?.url || ''}
-                    alt={selectedPlaylist.name}
+                    alt={selectedPlaylist.name || 'Playlist'}
                     className="w-28 h-28 mx-auto rounded-2xl shadow-lg object-cover mb-2"
                   />
                   <h3 className="font-bold text-xs truncate">{selectedPlaylist.name}</h3>
-                  <p className="text-[10px] opacity-60">{selectedPlaylist.tracks.total} songs</p>
+                  <p className="text-[10px] opacity-60">
+                    {selectedPlaylist.tracks?.total ?? 0} songs
+                  </p>
                   <button
                     onClick={() => handlePlayPlaylist(selectedPlaylist.uri)}
                     className="mt-2 px-3 py-1 bg-emerald-500 hover:bg-emerald-400 text-black text-[11px] font-bold rounded-full transition-transform hover:scale-105 active:scale-95 shadow-md shadow-emerald-500/20"
@@ -569,39 +587,43 @@ export default function HomePage() {
                   {isLoadingTracks ? (
                     <div className="p-4 text-center text-xs opacity-50 animate-pulse">Loading songs...</div>
                   ) : (
-                    playlistTracks.map((track, idx) => (
-                      <div
-                        key={`${track.id}-${idx}`}
-                        className={`group flex items-center justify-between p-2 rounded-xl transition-colors text-xs ${
-                          isDark ? 'hover:bg-white/[0.06]' : 'hover:bg-zinc-200/60'
-                        }`}
-                      >
-                        <div className="truncate flex-1 pr-2">
-                          <p className="font-medium truncate group-hover:text-emerald-500 transition-colors">
-                            {track.name}
-                          </p>
-                          <p className="text-[10px] opacity-60 truncate">
-                            {track.artists.map((a) => a.name).join(', ')}
-                          </p>
+                    playlistTracks.map((track, idx) => {
+                      const artistLine = Array.isArray(track?.artists)
+                        ? track.artists.map((a) => a?.name).filter(Boolean).join(', ')
+                        : 'Unknown Artist';
+
+                      return (
+                        <div
+                          key={`${track.id}-${idx}`}
+                          className={`group flex items-center justify-between p-2 rounded-xl transition-colors text-xs ${
+                            isDark ? 'hover:bg-white/[0.06]' : 'hover:bg-zinc-200/60'
+                          }`}
+                        >
+                          <div className="truncate flex-1 pr-2">
+                            <p className="font-medium truncate group-hover:text-emerald-500 transition-colors">
+                              {track.name}
+                            </p>
+                            <p className="text-[10px] opacity-60 truncate">{artistLine}</p>
+                          </div>
+                          <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                            <button
+                              onClick={() => handlePlayTrack(track.uri)}
+                              title="Play"
+                              className="p-1 hover:text-emerald-500"
+                            >
+                              <Play className="w-3 h-3 fill-current" />
+                            </button>
+                            <button
+                              onClick={() => handleAddToQueue(track)}
+                              title="Queue"
+                              className="p-1 hover:text-emerald-500"
+                            >
+                              <ListPlus className="w-3 h-3" />
+                            </button>
+                          </div>
                         </div>
-                        <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                          <button
-                            onClick={() => handlePlayTrack(track.uri)}
-                            title="Play"
-                            className="p-1 hover:text-emerald-500"
-                          >
-                            <Play className="w-3 h-3 fill-current" />
-                          </button>
-                          <button
-                            onClick={() => handleAddToQueue(track)}
-                            title="Queue"
-                            className="p-1 hover:text-emerald-500"
-                          >
-                            <ListPlus className="w-3 h-3" />
-                          </button>
-                        </div>
-                      </div>
-                    ))
+                      );
+                    })
                   )}
                 </div>
               </div>
@@ -616,7 +638,7 @@ export default function HomePage() {
                 </button>
               </div>
             ) : (
-              /* Normal Playlists Cards */
+              /* Playlists Cards */
               playlists.map((pl) => (
                 <div
                   key={pl.id}
@@ -627,14 +649,14 @@ export default function HomePage() {
                 >
                   <img
                     src={pl.images?.[0]?.url || ''}
-                    alt={pl.name}
+                    alt={pl.name || 'Playlist'}
                     className="w-10 h-10 rounded-lg object-cover shadow-sm shrink-0"
                   />
                   <div className="truncate flex-1">
                     <p className="text-xs font-semibold truncate group-hover:text-emerald-500 transition-colors">
                       {pl.name}
                     </p>
-                    <p className="text-[10px] opacity-60">{pl.tracks.total} songs</p>
+                    <p className="text-[10px] opacity-60">{pl.tracks?.total ?? 0} songs</p>
                   </div>
                 </div>
               ))
@@ -646,8 +668,6 @@ export default function HomePage() {
         {/* CENTER STAGE: CLEAN FLOATING DECK + WIDE COMPACT CHAT   */}
         {/* -------------------------------------------------------- */}
         <main className="flex-1 flex flex-col justify-between overflow-hidden px-6 py-4">
-          
-          {/* UPPER DECK: ARTWORK & CONTROLS (NO VOLUME SLIDER) */}
           <div className="flex-1 flex flex-col items-center justify-center min-h-0">
             <div className="w-full max-w-md flex flex-col items-center text-center">
               
@@ -734,7 +754,7 @@ export default function HomePage() {
             </div>
           </div>
 
-          {/* LOWER DECK: WIDE, COMPACT AI CONSOLE (NO CHIPS) */}
+          {/* LOWER DECK: WIDE, COMPACT AI CONSOLE */}
           <div
             className={`w-full max-w-3xl mx-auto h-[20vh] border rounded-2xl backdrop-blur-2xl flex flex-col justify-between p-3 shrink-0 shadow-lg transition-colors ${
               isDark
@@ -742,7 +762,6 @@ export default function HomePage() {
                 : 'border-zinc-200/80 bg-white/80'
             }`}
           >
-            {/* Wide Message History Stream */}
             <div className="flex-1 overflow-y-auto space-y-1.5 pr-2 text-xs">
               {messages.map((m, i) => (
                 <div
@@ -770,7 +789,6 @@ export default function HomePage() {
               <div ref={chatBottomRef} />
             </div>
 
-            {/* Wide Input Bar */}
             <form onSubmit={handleFormSubmit} className="flex gap-2 pt-2">
               <input
                 type="text"
@@ -795,7 +813,7 @@ export default function HomePage() {
         </main>
 
         {/* -------------------------------------------------------- */}
-        {/* RIGHT WING: QUEUE (Substantial w-64 with titles by default)*/}
+        {/* RIGHT WING: QUEUE                                        */}
         {/* -------------------------------------------------------- */}
         <aside
           className={`h-full w-64 border-l backdrop-blur-2xl flex flex-col shrink-0 overflow-hidden transition-colors duration-300 ${
@@ -804,7 +822,6 @@ export default function HomePage() {
               : 'border-zinc-200/80 bg-white/70 text-zinc-900 shadow-sm'
           }`}
         >
-          {/* Header */}
           <div
             className={`p-3.5 border-b flex items-center justify-between min-h-[44px] ${
               isDark ? 'border-white/[0.04]' : 'border-zinc-200/60'
@@ -815,42 +832,45 @@ export default function HomePage() {
             </h2>
           </div>
 
-          {/* Queue List */}
           <div className="flex-1 overflow-y-auto p-2 space-y-1.5 no-scrollbar">
             {queue.length === 0 ? (
               <div className="p-4 text-center text-xs opacity-50">Queue is empty</div>
             ) : (
-              queue.map((track, idx) => (
-                <div
-                  key={`${track.id}-${idx}`}
-                  onClick={() => handlePlayTrack(track.uri)}
-                  className={`group rounded-xl cursor-pointer transition-all flex items-center gap-3 p-2 ${
-                    isDark ? 'hover:bg-white/[0.06]' : 'hover:bg-zinc-200/60'
-                  }`}
-                  title={`${track.name} - ${track.artists.map((a) => a.name).join(', ')}`}
-                >
-                  <img
-                    src={track.album?.images?.[0]?.url || ''}
-                    alt={track.name}
-                    className="w-10 h-10 rounded-lg object-cover shadow-sm shrink-0"
-                  />
-                  <div className="truncate flex-1">
-                    <p className="text-xs font-semibold truncate group-hover:text-emerald-500 transition-colors">
-                      {track.name}
-                    </p>
-                    <p className="text-[10px] opacity-60 truncate">
-                      {track.artists.map((a) => a.name).join(', ')}
-                    </p>
+              queue.map((track, idx) => {
+                const artistLine = Array.isArray(track?.artists)
+                  ? track.artists.map((a) => a?.name).filter(Boolean).join(', ')
+                  : 'Unknown Artist';
+
+                return (
+                  <div
+                    key={`${track.id || idx}-${idx}`}
+                    onClick={() => track.uri && handlePlayTrack(track.uri)}
+                    className={`group rounded-xl cursor-pointer transition-all flex items-center gap-3 p-2 ${
+                      isDark ? 'hover:bg-white/[0.06]' : 'hover:bg-zinc-200/60'
+                    }`}
+                    title={`${track.name} - ${artistLine}`}
+                  >
+                    <img
+                      src={track.album?.images?.[0]?.url || ''}
+                      alt={track.name || 'Song'}
+                      className="w-10 h-10 rounded-lg object-cover shadow-sm shrink-0"
+                    />
+                    <div className="truncate flex-1">
+                      <p className="text-xs font-semibold truncate group-hover:text-emerald-500 transition-colors">
+                        {track.name}
+                      </p>
+                      <p className="text-[10px] opacity-60 truncate">{artistLine}</p>
+                    </div>
                   </div>
-                </div>
-              ))
+                );
+              })
             )}
           </div>
         </aside>
       </div>
 
       {/* ======================================================== */}
-      {/* 3. SETTINGS MODAL (Theme First, Gemini Key, Permissions) */}
+      {/* 3. SETTINGS MODAL                                        */}
       {/* ======================================================== */}
       {showSettingsModal && (
         <div className="fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex items-center justify-center p-4">
@@ -859,7 +879,6 @@ export default function HomePage() {
               isDark ? 'bg-[#0e1017] border-white/10 text-white' : 'bg-white border-zinc-200 text-zinc-900'
             }`}
           >
-            {/* Header */}
             <div className={`flex items-center justify-between border-b pb-3 ${isDark ? 'border-white/[0.08]' : 'border-zinc-200'}`}>
               <div className="flex items-center gap-2">
                 <Settings className="w-4 h-4 text-emerald-500" />
@@ -873,7 +892,7 @@ export default function HomePage() {
               </button>
             </div>
 
-            {/* SETTING 1: APPEARANCE / THEME TOGGLE */}
+            {/* SETTING 1: APPEARANCE */}
             <div className="space-y-2">
               <label className="text-[11px] font-mono uppercase tracking-wider opacity-60">
                 Appearance
@@ -930,7 +949,7 @@ export default function HomePage() {
               />
             </div>
 
-            {/* SETTING 3: SPOTIFY PLAYLIST SYNC / PERMISSIONS */}
+            {/* SETTING 3: SPOTIFY PLAYLIST SYNC */}
             <div className="space-y-2 border-t pt-3 border-inherit">
               <label className="text-[11px] font-mono uppercase tracking-wider opacity-60">
                 Spotify Sync
@@ -947,7 +966,6 @@ export default function HomePage() {
               </button>
             </div>
 
-            {/* Save Button */}
             <div className="flex justify-end gap-2 pt-2">
               <button
                 onClick={() => setShowSettingsModal(false)}
