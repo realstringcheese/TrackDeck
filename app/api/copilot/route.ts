@@ -38,6 +38,37 @@ Command rules:
 
 Reply with valid JSON only.`;
 
+    // 1. DYNAMIC MODEL DISCOVERY: Find the active free model on this key
+    let targetModel = 'openai/gpt-oss-120b';
+
+    try {
+      const modelsRes = await fetch('https://api.groq.com/openai/v1/models', {
+        headers: { Authorization: `Bearer ${cleanKey}` },
+      });
+
+      if (modelsRes.ok) {
+        const list = await modelsRes.json();
+        const available = (list.data || [])
+          .map((m: { id: string }) => m.id)
+          .filter(
+            (id: string) =>
+              !id.includes('whisper') &&
+              !id.includes('guard') &&
+              !id.includes('tts')
+          );
+
+        if (available.length > 0) {
+          targetModel =
+            available.find((id: string) => id.includes('120b')) ||
+            available.find((id: string) => id.includes('20b')) ||
+            available.find((id: string) => id.includes('qwen')) ||
+            available[0];
+        }
+      }
+    } catch {
+      targetModel = 'openai/gpt-oss-120b';
+    }
+
     const messages = [
       { role: 'system', content: systemPrompt },
       ...(history || []).slice(-4).map((m: { role: string; text: string }) => ({
@@ -54,7 +85,7 @@ Reply with valid JSON only.`;
         Authorization: `Bearer ${cleanKey}`,
       },
       body: JSON.stringify({
-        model: 'llama-3.1-8b-instant',
+        model: targetModel,
         messages,
         temperature: 0.3,
         response_format: { type: 'json_object' },
