@@ -1,18 +1,17 @@
-// Spotify PKCE & Player Client (100% in-browser)
+// Spotify PKCE, Playlists & Queue Client
 
 const CLIENT_ID = process.env.NEXT_PUBLIC_SPOTIFY_CLIENT_ID || '';
 const SCOPES = [
   'user-read-playback-state',
   'user-modify-playback-state',
   'user-read-currently-playing',
+  'playlist-read-private',
+  'playlist-read-collaborative',
 ].join(' ');
 
-// Generate PKCE code verifier & challenge
 export async function redirectToSpotifyAuth(customClientId?: string) {
   const clientId = customClientId || CLIENT_ID || localStorage.getItem('spotify_client_id') || '';
-  if (!clientId) {
-    throw new Error('Missing Spotify Client ID');
-  }
+  if (!clientId) throw new Error('Missing Spotify Client ID');
   localStorage.setItem('spotify_client_id', clientId);
 
   const verifier = generateRandomString(64);
@@ -25,11 +24,7 @@ export async function redirectToSpotifyAuth(customClientId?: string) {
     binary += String.fromCharCode(bytes[i]);
   }
 
-  const challenge = btoa(binary)
-    .replace(/=/g, '')
-    .replace(/\+/g, '-')
-    .replace(/\//g, '_');
-
+  const challenge = btoa(binary).replace(/=/g, '').replace(/\+/g, '-').replace(/\//g, '_');
   const redirectUri = `${window.location.origin}/callback`;
   const params = new URLSearchParams({
     client_id: clientId,
@@ -81,7 +76,6 @@ export async function getAccessToken(): Promise<string | null> {
 
   if (!token) return null;
 
-  // Auto-refresh if expired
   if (Date.now() > expires - 60000 && refreshToken) {
     const payload = new URLSearchParams({
       client_id: clientId,
@@ -123,6 +117,19 @@ export async function spotifyFetch(endpoint: string, options: RequestInit = {}) 
   if (!res.ok) return null;
   return res.json();
 }
+
+// User Playlists & Queue Endpoints
+export const SpotifyAPI = {
+  getPlaylists: () => spotifyFetch('/me/playlists?limit=25'),
+  getPlaylistTracks: (playlistId: string) => spotifyFetch(`/playlists/${playlistId}/tracks?limit=50`),
+  getQueue: () => spotifyFetch('/me/player/queue'),
+  addToQueue: (uri: string) => spotifyFetch(`/me/player/queue?uri=${encodeURIComponent(uri)}`, { method: 'POST' }),
+  playUri: (contextUri?: string, uris?: string[]) =>
+    spotifyFetch('/me/player/play', {
+      method: 'PUT',
+      body: JSON.stringify({ context_uri: contextUri, uris }),
+    }),
+};
 
 function generateRandomString(length: number): string {
   const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
