@@ -4,6 +4,8 @@ export async function GET() {
   return NextResponse.json({ status: 'TrackDeck Copilot API is live and ready!' });
 }
 
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
 export async function POST(req: NextRequest) {
   try {
     const { prompt, history, apiKey, currentTrackInfo } = await req.json();
@@ -30,23 +32,18 @@ Rules:
 - Never output markdown backticks around the <<<ACTION>>> tag.
 - Only include <<<ACTION>>> if the user gave an explicit command to change playback.`;
 
-    // CRITICAL FIX: Gemini API requires:
-    // 1. First message MUST be 'user' (cannot be 'model' greeting)
-    // 2. Roles must strictly alternate: user -> model -> user
+    // Ensure conversation strictly starts with 'user' and alternates roles
     const conversation: { role: 'user' | 'model'; parts: { text: string }[] }[] = [];
 
     const rawHistory = Array.isArray(history) ? history : [];
     for (const msg of rawHistory) {
-      // Ignore initial welcome greeting
       if (msg.text?.includes('TrackDeck Copilot ready')) continue;
       if (!msg.text?.trim()) continue;
 
       const role = msg.role === 'model' ? 'model' : 'user';
 
-      // Ensure first message is user
       if (conversation.length === 0 && role !== 'user') continue;
 
-      // Ensure alternating roles
       if (conversation.length > 0 && conversation[conversation.length - 1].role === role) {
         conversation[conversation.length - 1].parts[0].text += `\n${msg.text}`;
       } else {
@@ -54,18 +51,18 @@ Rules:
       }
     }
 
-    // Append the current prompt as user
     if (conversation.length > 0 && conversation[conversation.length - 1].role === 'user') {
       conversation[conversation.length - 1].parts[0].text += `\n${prompt}`;
     } else {
       conversation.push({ role: 'user', parts: [{ text: prompt }] });
     }
 
+    // Models ordered by speed and capacity pool
     const modelsToTry = [
       'gemini-2.5-flash',
+      'gemini-2.0-flash-lite',
       'gemini-2.0-flash',
       'gemini-flash-latest',
-      'gemini-1.5-flash-latest',
     ];
 
     let lastError = '';
@@ -73,37 +70,54 @@ Rules:
     for (const model of modelsToTry) {
       const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`;
 
-      const res = await fetch(url, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-goog-api-key': apiKey.trim(),
-        },
-        body: JSON.stringify({
-          systemInstruction: { parts: [{ text: systemInstruction }] },
-          contents: conversation,
-          generationConfig: {
-            temperature: 0.7,
-            maxOutputTokens: 500,
-          },
-        }),
-      });
+      // Try each model, retrying once if Google reports 503 overload
+      for (let attempt = 0; attempt < 2; attempt++) {
+        try {
+          const res = await fetch(url, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'x-goog-api-key': apiKey.trim(),
+            },
+            body: JSON.stringify({
+              systemInstruction: { parts: [{ text: systemInstruction }] },
+              contents: conversation,
+              generationConfig: {
+                temperature: 0.7,
+                maxOutputTokens: 500,
+              },
+            }),
+          });
 
-      if (res.status === 404) continue;
+          // If model doesn't exist, skip to next model
+          if (res.status === 404) break;
 
-      if (!res.ok) {
-        lastError = await res.text();
-        continue;
+          // If Google reports 503 (Overloaded), wait 1 second and retry
+          if (res.status === 503) {
+            lastError = 'Google model is overloaded. Retrying...';
+            await sleep(1000);
+            continue;
+          }
+
+          if (!res.ok) {
+            lastError = await res.text();
+            break;
+          }
+
+          const data = await res.json();
+          const rawText = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+          if (rawText) {
+            return NextResponse.json({ rawText });
+          }
+        } catch (e: unknown) {
+          lastError = e instanceof Error ? e.message : 'Fetch error';
+        }
       }
-
-      const data = await res.json();
-      const rawText = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
-      return NextResponse.json({ rawText });
     }
 
     return NextResponse.json(
-      { error: lastError || 'All Gemini models rejected the request' },
-      { status: 500 }
+      { error: lastError || 'Google servers are currently congested. Please try again in a moment.' },
+      { status: 503 }
     );
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : 'Internal server error';
