@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 export async function GET() {
-  return NextResponse.json({ status: 'TrackDeck Copilot API is live and ready!' });
+  return NextResponse.json({ status: 'TrackDeck Copilot API is live!' });
 }
 
 export async function POST(req: NextRequest) {
@@ -15,113 +15,64 @@ export async function POST(req: NextRequest) {
     const cleanKey = apiKey.trim();
 
     const trackContext = currentTrackInfo
-      ? `Current playing track: "${currentTrackInfo.name}" by ${currentTrackInfo.artist} (Album: ${currentTrackInfo.album}). Status: ${currentTrackInfo.isPlaying ? 'Playing' : 'Paused'}.`
+      ? `Now playing: "${currentTrackInfo.name}" by ${currentTrackInfo.artist} (${currentTrackInfo.album}). Status: ${currentTrackInfo.isPlaying ? 'Playing' : 'Paused'}.`
       : `No track is currently playing.`;
 
-    const systemInstruction = `You are TrackDeck's AI Music Companion: an elite music nerd and audio production connoisseur.
+    const systemPrompt = `You are TrackDeck Copilot, an elite music assistant and hip-hop/production expert.
+Context: ${trackContext}
 
-You have two jobs:
-1. Converse insightfully about music, beats, sound design, and producer credits (1-2 sentences).
-2. PLAYBACK CONTROL (STRICT INTENT EXTRACTION):
-Whenever the user wants music, you MUST classify the request into one of these strict action tags:
+You MUST reply with a raw JSON object matching this exact schema:
+{
+  "message": "Your short, knowledgeable 1-2 sentence conversational answer to the user.",
+  "command": "play" | "pause" | "next" | "prev" | "queue" | null,
+  "query": "clean song or artist name to search on Spotify, or null"
+}
 
-- Specific Song: <<<ACTION:{"type":"play_track","track":"song title","artist":"artist name or empty"}>>>
-  Example: "play Silly Watch by Uzi" -> <<<ACTION:{"type":"play_track","track":"Silly Watch","artist":"Lil Uzi Vert"}>>>
+Command rules:
+- If user wants to hear music (e.g. "play Silly Watch by Uzi", "play some Carti", "put on Drake"): set command="play" and query="Silly Watch Lil Uzi Vert" (or artist name).
+- If user wants to queue: set command="queue" and query="song name".
+- If user wants to skip: set command="next" and query=null.
+- If user wants to pause: set command="pause" and query=null.
+- If user wants to resume: set command="play" and query=null.
+- If user is just chatting, asking trivia, or asking who produced a song: set command=null and query=null.
 
-- Just an Artist: <<<ACTION:{"type":"play_artist","artist":"artist name"}>>>
-  Example: "play some Uzi" -> <<<ACTION:{"type":"play_artist","artist":"Lil Uzi Vert"}>>>
+Reply with valid JSON only.`;
 
-- Queue a Song: <<<ACTION:{"type":"queue_track","track":"song title","artist":"artist name or empty"}>>>
-  Example: "queue Hoe Cakes" -> <<<ACTION:{"type":"queue_track","track":"Hoe Cakes","artist":"MF DOOM"}>>>
+    const messages = [
+      { role: 'system', content: systemPrompt },
+      ...(history || []).slice(-4).map((m: { role: string; text: string }) => ({
+        role: m.role === 'model' ? 'assistant' : 'user',
+        content: m.text,
+      })),
+      { role: 'user', content: prompt },
+    ];
 
-- Playback buttons:
-  - Skip: <<<ACTION:{"type":"next"}>>>
-  - Pause: <<<ACTION:{"type":"pause"}>>>
-  - Resume: <<<ACTION:{"type":"play"}>>>
+    const groqRes = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${cleanKey}`,
+      },
+      body: JSON.stringify({
+        model: 'llama-3.1-8b-instant',
+        messages,
+        temperature: 0.3,
+        response_format: { type: 'json_object' },
+      }),
+    });
 
-Context:
-${trackContext}
-
-Rules:
-- Never guess or combine song + artist into one field.
-- If asked to play, ALWAYS output the tag.
-- Keep the conversational reply punchy and confident (1 short sentence).`;
-
-    if (cleanKey.startsWith('gsk_')) {
-      let chosenModel = 'qwen/qwen3.8-27b';
-
-      try {
-        const modelsRes = await fetch('https://api.groq.com/openai/v1/models', {
-          headers: { Authorization: `Bearer ${cleanKey}` },
-        });
-
-        if (modelsRes.ok) {
-          const list = await modelsRes.json();
-          const validModels = (list.data || [])
-            .map((m: { id: string }) => m.id)
-            .filter(
-              (id: string) =>
-                !id.includes('whisper') &&
-                !id.includes('tts') &&
-                !id.includes('guard') &&
-                !id.includes('8192')
-            );
-
-          if (validModels.length > 0) {
-            chosenModel =
-              validModels.find((id: string) => id.includes('120b')) ||
-              validModels.find((id: string) => id.includes('qwen3.8')) ||
-              validModels.find((id: string) => id.includes('70b')) ||
-              validModels[0];
-          }
-        }
-      } catch (e) {
-        console.warn('Groq model lookup failed, using fallback', e);
-      }
-
-      const cleanMessages: { role: 'system' | 'user' | 'assistant'; content: string }[] = [
-        { role: 'system', content: systemInstruction },
-      ];
-
-      for (const m of (history || []).slice(-6)) {
-        if (!m.text || m.text.includes('TrackDeck Copilot ready')) continue;
-        const role = m.role === 'model' ? 'assistant' : 'user';
-        if (cleanMessages.length === 1 && role !== 'user') continue;
-        cleanMessages.push({ role, content: m.text });
-      }
-
-      cleanMessages.push({ role: 'user', content: prompt });
-
-      const groqRes = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${cleanKey}`,
-        },
-        body: JSON.stringify({
-          model: chosenModel,
-          messages: cleanMessages,
-          temperature: 0.5,
-          max_tokens: 300,
-        }),
-      });
-
-      if (!groqRes.ok) {
-        const errText = await groqRes.text();
-        return NextResponse.json({ error: `Groq error: ${errText}` }, { status: 500 });
-      }
-
-      const groqData = await groqRes.json();
-      const rawText = groqData.choices?.[0]?.message?.content || '';
-      return NextResponse.json({ rawText });
+    if (!groqRes.ok) {
+      const err = await groqRes.text();
+      return NextResponse.json({ error: `Groq error: ${err}` }, { status: 500 });
     }
 
-    return NextResponse.json(
-      { error: 'Please enter a valid Groq API key starting with gsk_' },
-      { status: 400 }
-    );
+    const data = await groqRes.json();
+    const content = data.choices?.[0]?.message?.content || '{}';
+    const parsed = JSON.parse(content);
+
+    return NextResponse.json(parsed);
   } catch (err: unknown) {
-    const message = err instanceof Error ? err.message : 'Internal server error';
-    return NextResponse.json({ error: message }, { status: 500 });
+    const msg = err instanceof Error ? err.message : 'Internal error';
+    return NextResponse.json({ error: msg }, { status: 500 });
   }
 }

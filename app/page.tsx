@@ -7,12 +7,7 @@ import {
   SkipForward,
   SkipBack,
   Sparkles,
-  Key,
-  LogOut,
-  Send,
-  ExternalLink,
   Music2,
-  Check,
   Disc3,
   ListPlus,
   ArrowLeft,
@@ -22,9 +17,11 @@ import {
   Moon,
   RefreshCw,
   X,
+  Send,
+  ExternalLink,
 } from 'lucide-react';
 import { getAccessToken, spotifyFetch, redirectToSpotifyAuth, SpotifyAPI } from '@/lib/spotify';
-import { askGemini, ChatMessage, CopilotAction } from '@/lib/gemini';
+import { askGemini, ChatMessage, CopilotResponse } from '@/lib/gemini';
 
 interface Playlist {
   id: string;
@@ -50,11 +47,11 @@ export default function HomePage() {
   const [showSpotifyModal, setShowSpotifyModal] = useState(false);
   const [showSettingsModal, setShowSettingsModal] = useState(false);
 
-  // Gemini / Groq Key
+  // Key
   const [geminiKey, setGeminiKey] = useState<string>('');
   const [keyInput, setKeyInput] = useState('');
 
-  // Playback State
+  // Playback
   const [playback, setPlayback] = useState<{
     name: string;
     artist: string;
@@ -70,34 +67,31 @@ export default function HomePage() {
   const activeDeviceId = useRef<string | null>(null);
   const isActionPending = useRef(false);
 
-  // Playlists (Left Wing)
+  // Playlists & Queue
   const [playlists, setPlaylists] = useState<Playlist[]>([]);
   const [selectedPlaylist, setSelectedPlaylist] = useState<Playlist | null>(null);
   const [playlistTracks, setPlaylistTracks] = useState<TrackItem[]>([]);
   const [isLoadingTracks, setIsLoadingTracks] = useState(false);
-
-  // Queue (Right Wing)
   const [queue, setQueue] = useState<TrackItem[]>([]);
 
-  // AI Chat
+  // Chat
   const [messages, setMessages] = useState<ChatMessage[]>([
     {
       role: 'model',
-      text: 'TrackDeck Copilot ready. Ask for any specific track, artist, or music trivia.',
+      text: 'TrackDeck Copilot ready. Ask for any song, artist, or music trivia.',
     },
   ]);
   const [chatInput, setChatInput] = useState('');
   const [isAiLoading, setIsAiLoading] = useState(false);
   const chatBottomRef = useRef<HTMLDivElement>(null);
 
-  // 1. Initial Load & Theme Hydration
   useEffect(() => {
     const savedTheme = (localStorage.getItem('trackdeck_theme') as 'dark' | 'light') || 'dark';
     setTheme(savedTheme);
 
-    const savedGeminiKey = localStorage.getItem('gemini_api_key') || '';
-    setGeminiKey(savedGeminiKey);
-    setKeyInput(savedGeminiKey);
+    const savedKey = localStorage.getItem('gemini_api_key') || '';
+    setGeminiKey(savedKey);
+    setKeyInput(savedKey);
 
     const savedClientId =
       localStorage.getItem('spotify_client_id') ||
@@ -131,21 +125,20 @@ export default function HomePage() {
     localStorage.setItem('trackdeck_theme', newTheme);
   }
 
-  // 2. Real-Time Sync Polling (Every 1.5s)
+  // Polling
   useEffect(() => {
     if (!isAuthenticated) return;
     const interval = setInterval(fetchNowPlaying, 1500);
     return () => clearInterval(interval);
   }, [isAuthenticated]);
 
-  // Periodic Queue Refresh (Every 10s)
   useEffect(() => {
     if (!isAuthenticated) return;
     const interval = setInterval(loadQueue, 10000);
     return () => clearInterval(interval);
   }, [isAuthenticated]);
 
-  // 3. Smooth Sub-Second Scrub Ticking
+  // Scrub Bar Ticking
   useEffect(() => {
     if (!playback?.isPlaying) return;
     const timer = setInterval(() => {
@@ -167,7 +160,7 @@ export default function HomePage() {
     chatBottomRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
-  // Get active online device
+  // Target Device Resolver
   async function resolveTargetDevice(): Promise<string | undefined> {
     try {
       const data = await spotifyFetch('/me/player/devices');
@@ -282,70 +275,44 @@ export default function HomePage() {
   }
 
   // ==========================================================
-  // DISPATCHER: GUARANTEED ACTION EXECUTION
+  // DIRECT 1-TO-1 SPOTIFY EXECUTION
   // ==========================================================
-  async function handleCopilotAction(action: CopilotAction): Promise<string> {
+  async function executeCopilotCommand(copilot: CopilotResponse): Promise<string | undefined> {
+    const { command, query } = copilot;
+    if (!command) return undefined;
+
     isActionPending.current = true;
     const deviceId = await resolveTargetDevice();
     const devParam = deviceId ? `?device_id=${deviceId}` : '';
 
     try {
-      // 1. PLAY SPECIFIC SONG
-      if (action.type === 'play_track') {
-        const query = action.artist
-          ? `${action.track} ${action.artist}`
-          : action.track || action.query || '';
-
-        // Search with account market filter
-        const searchRes = await spotifyFetch(
-          `/search?q=${encodeURIComponent(query)}&type=track&market=from_token&limit=3`
-        );
-
-        const track = searchRes?.tracks?.items?.[0];
-        if (track?.uri) {
-          await SpotifyAPI.playUri(undefined, [track.uri], deviceId);
-          setTimeout(() => {
-            fetchNowPlaying();
-            loadQueue();
-          }, 600);
-          return `Playing: ${track.name} - ${track.artists?.[0]?.name || ''}`;
-        }
-        return `Could not find track "${query}" on Spotify.`;
-      }
-
-      // 2. PLAY ARTIST
-      else if (action.type === 'play_artist' && action.artist) {
-        const searchRes = await spotifyFetch(
-          `/search?q=${encodeURIComponent(action.artist)}&type=artist&limit=1`
-        );
-        const artist = searchRes?.artists?.items?.[0];
-
-        if (artist?.id) {
-          const topTracksRes = await spotifyFetch(
-            `/artists/${artist.id}/top-tracks?market=from_token`
+      if (command === 'play') {
+        // If a query was provided, search and play that track
+        if (query) {
+          const searchRes = await spotifyFetch(
+            `/search?q=${encodeURIComponent(query)}&type=track&limit=5`
           );
-          const uris = (topTracksRes?.tracks || []).map((t: { uri: string }) => t.uri);
+          const track = searchRes?.tracks?.items?.[0];
 
-          if (uris.length > 0) {
-            await SpotifyAPI.playUri(undefined, uris, deviceId);
+          if (track?.uri) {
+            await SpotifyAPI.playUri(undefined, [track.uri], deviceId);
             setTimeout(() => {
               fetchNowPlaying();
               loadQueue();
             }, 600);
-            return `Spinning ${artist.name} Top Tracks`;
+            return `Playing: ${track.name} - ${track.artists?.[0]?.name || ''}`;
           }
+          return `No track found for "${query}"`;
+        } else {
+          // No query: resume
+          await spotifyFetch(`/me/player/play${devParam}`, { method: 'PUT' });
+          return 'Resumed';
         }
-        return `Could not find artist "${action.artist}".`;
       }
 
-      // 3. QUEUE SPECIFIC SONG
-      else if (action.type === 'queue_track' && action.track) {
-        const query = action.artist
-          ? `${action.track} ${action.artist}`
-          : action.track;
-
+      if (command === 'queue' && query) {
         const searchRes = await spotifyFetch(
-          `/search?q=${encodeURIComponent(query)}&type=track&market=from_token&limit=1`
+          `/search?q=${encodeURIComponent(query)}&type=track&limit=1`
         );
         const track = searchRes?.tracks?.items?.[0];
 
@@ -354,25 +321,26 @@ export default function HomePage() {
           setQueue((prev) => [track, ...prev]);
           return `Queued: ${track.name}`;
         }
-        return `Could not queue "${query}".`;
+        return `No track found to queue for "${query}"`;
       }
 
-      // 4. BUTTON ACTIONS
-      else if (action.type === 'next') {
+      if (command === 'next') {
         await spotifyFetch(`/me/player/next${devParam}`, { method: 'POST' });
-        return 'Skipped to next track';
-      } else if (action.type === 'pause') {
+        return 'Skipped';
+      }
+
+      if (command === 'pause') {
         await spotifyFetch(`/me/player/pause${devParam}`, { method: 'PUT' });
         return 'Paused';
-      } else if (action.type === 'play') {
-        await spotifyFetch(`/me/player/play${devParam}`, { method: 'PUT' });
-        return 'Resumed';
       }
 
-      return 'Command executed';
-    } catch (err) {
-      console.warn('Action dispatch failed', err);
-      return 'Action failed to reach Spotify';
+      if (command === 'prev') {
+        await spotifyFetch(`/me/player/previous${devParam}`, { method: 'POST' });
+        return 'Previous track';
+      }
+    } catch (e) {
+      console.error('Command execution failed', e);
+      return 'Command failed';
     } finally {
       setTimeout(() => {
         isActionPending.current = false;
@@ -380,6 +348,8 @@ export default function HomePage() {
         loadQueue();
       }, 700);
     }
+
+    return undefined;
   }
 
   // Media Controls
@@ -494,7 +464,7 @@ export default function HomePage() {
     setShowSettingsModal(false);
     setMessages((prev) => [
       ...prev,
-      { role: 'model', text: '✨ Copilot is connected and ready to rock.' },
+      { role: 'model', text: '✨ Copilot is connected and ready.' },
     ]);
   }
 
@@ -513,16 +483,15 @@ export default function HomePage() {
       const response = await askGemini(textToSend, messages, geminiKey, playback);
       let executedActionSummary: string | undefined = undefined;
 
-      // Execute action guaranteed
-      if (response.action) {
-        executedActionSummary = await handleCopilotAction(response.action);
+      if (response.command) {
+        executedActionSummary = await executeCopilotCommand(response);
       }
 
       setMessages((prev) => [
         ...prev,
         {
           role: 'model',
-          text: response.reply,
+          text: response.message,
           actionTaken: executedActionSummary,
         },
       ]);
@@ -880,7 +849,6 @@ export default function HomePage() {
                   >
                     {m.text}
                   </div>
-                  {/* Action verification badge */}
                   {m.actionTaken && (
                     <span className="mt-1 text-[10px] font-mono text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-2 py-0.5 rounded-full">
                       ⚡ {m.actionTaken}
@@ -890,7 +858,7 @@ export default function HomePage() {
               ))}
               {isAiLoading && (
                 <div className="flex items-center gap-1.5 text-[11px] text-emerald-500 font-mono animate-pulse">
-                  <Sparkles className="w-3 h-3" /> Executing command...
+                  <Sparkles className="w-3 h-3" /> Thinking...
                 </div>
               )}
               <div ref={chatBottomRef} />
@@ -901,7 +869,7 @@ export default function HomePage() {
                 type="text"
                 value={chatInput}
                 onChange={(e) => setChatInput(e.target.value)}
-                placeholder="Try: 'play Silly Watch by Uzi', 'play some Drake', or 'queue Hoe Cakes'..."
+                placeholder="Try: 'play Silly Watch by Lil Uzi Vert', 'skip', or ask who produced this..."
                 className={`flex-1 border rounded-xl px-3.5 py-2 text-xs focus:outline-none transition-colors ${
                   isDark
                     ? 'bg-white/[0.03] border-white/10 text-white placeholder:text-zinc-500 focus:border-emerald-500/60'
