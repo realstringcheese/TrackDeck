@@ -33,7 +33,7 @@ Rules:
 - Only include <<<ACTION>>> if the user gave an explicit command to change playback.`;
 
     // ----------------------------------------------------
-    // ENGINE A: GROQ (If key starts with 'gsk_')
+    // ENGINE A: GROQ (Active Free Tier Models)
     // ----------------------------------------------------
     if (cleanKey.startsWith('gsk_')) {
       const messages = [
@@ -45,32 +45,47 @@ Rules:
         { role: 'user', content: prompt },
       ];
 
-      const groqRes = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${cleanKey}`,
-        },
-        body: JSON.stringify({
-          model: 'llama-3.3-70b-versatile',
-          messages,
-          temperature: 0.7,
-          max_tokens: 300,
-        }),
-      });
+      // Groq's high-speed free tier models
+      const groqModels = [
+        'llama-3.1-8b-instant',
+        'openai/gpt-oss-20b',
+        'llama3-8b-8192',
+      ];
 
-      if (!groqRes.ok) {
-        const errText = await groqRes.text();
-        return NextResponse.json({ error: `Groq error: ${errText}` }, { status: 500 });
+      let lastGroqErr = '';
+
+      for (const model of groqModels) {
+        const groqRes = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${cleanKey}`,
+          },
+          body: JSON.stringify({
+            model,
+            messages,
+            temperature: 0.7,
+            max_tokens: 300,
+          }),
+        });
+
+        if (!groqRes.ok) {
+          lastGroqErr = await groqRes.text();
+          continue;
+        }
+
+        const groqData = await groqRes.json();
+        const rawText = groqData.choices?.[0]?.message?.content || '';
+        if (rawText) {
+          return NextResponse.json({ rawText });
+        }
       }
 
-      const groqData = await groqRes.json();
-      const rawText = groqData.choices?.[0]?.message?.content || '';
-      return NextResponse.json({ rawText });
+      return NextResponse.json({ error: `Groq error: ${lastGroqErr}` }, { status: 500 });
     }
 
     // ----------------------------------------------------
-    // ENGINE B: GOOGLE GEMINI (3.8-Flash with Thinking OFF)
+    // ENGINE B: GOOGLE GEMINI FALLBACK
     // ----------------------------------------------------
     const conversation: { role: 'user' | 'model'; parts: { text: string }[] }[] = [];
     const rawHistory = Array.isArray(history) ? history : [];
@@ -95,32 +110,30 @@ Rules:
       conversation.push({ role: 'user', parts: [{ text: prompt }] });
     }
 
-    const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent?key=${cleanKey}`;
-
-    const res = await fetch(geminiUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        systemInstruction: { parts: [{ text: systemInstruction }] },
-        contents: conversation,
-        generationConfig: {
-          temperature: 0.7,
-          maxOutputTokens: 300,
-          // CRITICAL: Turn off internal thinking to prevent 5-minute hang
-          thinkingConfig: {
-            thinkingBudget: 0,
+    const geminiRes = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent?key=${cleanKey}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          systemInstruction: { parts: [{ text: systemInstruction }] },
+          contents: conversation,
+          generationConfig: {
+            temperature: 0.7,
+            maxOutputTokens: 300,
+            thinkingConfig: { thinkingBudget: 0 },
           },
-        },
-      }),
-    });
+        }),
+      }
+    );
 
-    if (!res.ok) {
-      const errText = await res.text();
-      return NextResponse.json({ error: `Google API Error [${res.status}]: ${errText}` }, { status: res.status });
+    if (!geminiRes.ok) {
+      const errText = await geminiRes.text();
+      return NextResponse.json({ error: `Google API Error: ${errText}` }, { status: geminiRes.status });
     }
 
-    const data = await res.json();
-    const rawText = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+    const geminiData = await geminiRes.json();
+    const rawText = geminiData.candidates?.[0]?.content?.parts?.[0]?.text || '';
     return NextResponse.json({ rawText });
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : 'Internal server error';
