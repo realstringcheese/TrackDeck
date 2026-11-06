@@ -267,52 +267,87 @@ export default function HomePage() {
     }
   }
 
-  // --- SMART PLAY/SEARCH ENGINE (NEVER CLEARS QUEUE) ---
+  // --- SMART PLAY/SEARCH ENGINE WITH QUEUE PRESERVATION ---
   async function executeSearchPlay(query: string) {
     if (!query?.trim()) return;
 
     try {
-      const devParam = activeDeviceId.current ? `?device_id=${activeDeviceId.current}` : '';
+      isActionPending.current = true;
+      const cleanQuery = query.trim().replace(/^some\s+/i, '');
 
-      // Comprehensive search across tracks, albums, artists, and playlists
+      // Ensure active device ID
+      let deviceId = activeDeviceId.current;
+      if (!deviceId) {
+        const state = await spotifyFetch('/me/player');
+        if (state?.device?.id) {
+          deviceId = state.device.id;
+          activeDeviceId.current = state.device.id;
+        }
+      }
+
+      const devParam = deviceId ? `?device_id=${deviceId}` : '';
+
+      // Comprehensive search across artist, track, album, playlist
       const searchRes = await spotifyFetch(
-        `/search?q=${encodeURIComponent(query.trim())}&type=track,album,playlist,artist&limit=3`
+        `/search?q=${encodeURIComponent(cleanQuery)}&type=artist,track,album,playlist&limit=5`
       );
 
-      const track = searchRes?.tracks?.items?.[0];
-      const album = searchRes?.albums?.items?.[0];
-      const playlist = searchRes?.playlists?.items?.[0];
-      const artist = searchRes?.artists?.items?.[0];
+      const artists = searchRes?.artists?.items || [];
+      const tracks = searchRes?.tracks?.items || [];
+      const albums = searchRes?.albums?.items || [];
+      const playlists = searchRes?.playlists?.items || [];
 
-      // 1. If it matched a specific track:
-      if (track?.uri) {
-        // If music is already playing: add to queue and trigger next (preserves queue!)
-        if (playback?.isPlaying) {
-          await SpotifyAPI.addToQueue(track.uri);
-          await spotifyFetch(`/me/player/next${devParam}`, { method: 'POST' });
-        } else {
-          // If idle or paused: start playback directly
-          await spotifyFetch(`/me/player/play${devParam}`, {
-            method: 'PUT',
-            body: JSON.stringify({ uris: [track.uri] }),
-          });
-        }
-      } 
-      // 2. If it matched an album, playlist, or artist:
-      else if (album?.uri || playlist?.uri || artist?.uri) {
-        const contextUri = album?.uri || playlist?.uri || artist?.uri;
+      // Check if query was for an artist (e.g. "Uzi", "Drake", "Carti")
+      const artistMatch = artists.find(
+        (a: { name: string }) =>
+          a.name.toLowerCase().includes(cleanQuery.toLowerCase()) ||
+          cleanQuery.toLowerCase().includes(a.name.toLowerCase())
+      );
+
+      // CASE 1: Query is an Artist -> Play Artist Radio (Endless stream, never halts)
+      if (artistMatch?.uri && (cleanQuery.length < 15 || !tracks[0]?.name.toLowerCase().includes(cleanQuery.toLowerCase()))) {
         await spotifyFetch(`/me/player/play${devParam}`, {
           method: 'PUT',
-          body: JSON.stringify({ context_uri: contextUri }),
+          body: JSON.stringify({ context_uri: artistMatch.uri }),
         });
+      }
+      // CASE 2: Query matches an Album or Playlist
+      else if (albums[0] && albums[0].name.toLowerCase().includes(cleanQuery.toLowerCase())) {
+        await spotifyFetch(`/me/player/play${devParam}`, {
+          method: 'PUT',
+          body: JSON.stringify({ context_uri: albums[0].uri }),
+        });
+      }
+      else if (playlists[0] && playlists[0].name.toLowerCase().includes(cleanQuery.toLowerCase())) {
+        await spotifyFetch(`/me/player/play${devParam}`, {
+          method: 'PUT',
+          body: JSON.stringify({ context_uri: playlists[0].uri }),
+        });
+      }
+      // CASE 3: Specific Track -> Queue & wait 800ms before skip so queue is preserved
+      else if (tracks[0]?.uri) {
+        const trackUri = tracks[0].uri;
+        if (playback?.isPlaying) {
+          await SpotifyAPI.addToQueue(trackUri);
+          // Wait 800ms for phone to register track in queue before skipping
+          await new Promise((r) => setTimeout(r, 800));
+          await spotifyFetch(`/me/player/next${devParam}`, { method: 'POST' });
+        } else {
+          await spotifyFetch(`/me/player/play${devParam}`, {
+            method: 'PUT',
+            body: JSON.stringify({ uris: [trackUri] }),
+          });
+        }
       }
 
       setTimeout(() => {
+        isActionPending.current = false;
         fetchNowPlaying();
         loadQueue();
-      }, 700);
+      }, 1000);
     } catch (err) {
-      console.warn('Search & play failed', err);
+      console.warn('executeSearchPlay error', err);
+      isActionPending.current = false;
     }
   }
 
@@ -835,7 +870,7 @@ export default function HomePage() {
                 type="text"
                 value={chatInput}
                 onChange={(e) => setChatInput(e.target.value)}
-                placeholder="Ask about music, samples, or say 'play One Beer'..."
+                placeholder="Ask about music, samples, or say 'play some Uzi'..."
                 className={`flex-1 border rounded-xl px-3.5 py-2 text-xs focus:outline-none transition-colors ${
                   isDark
                     ? 'bg-white/[0.03] border-white/10 text-white placeholder:text-zinc-500 focus:border-emerald-500/60'
@@ -929,7 +964,7 @@ export default function HomePage() {
               </button>
             </div>
 
-            {/* SETTING 1: APPEARANCE */}
+            {/* APPEARANCE */}
             <div className="space-y-2">
               <label className="text-[11px] font-mono uppercase tracking-wider opacity-60">
                 Appearance
@@ -958,7 +993,7 @@ export default function HomePage() {
               </div>
             </div>
 
-            {/* SETTING 2: API KEY */}
+            {/* API KEY */}
             <div className="space-y-2">
               <div className="flex items-center justify-between">
                 <label className="text-[11px] font-mono uppercase tracking-wider opacity-60">
@@ -986,7 +1021,7 @@ export default function HomePage() {
               />
             </div>
 
-            {/* SETTING 3: SPOTIFY PLAYLIST SYNC */}
+            {/* SPOTIFY PLAYLIST SYNC */}
             <div className="space-y-2 border-t pt-3 border-inherit">
               <label className="text-[11px] font-mono uppercase tracking-wider opacity-60">
                 Spotify Sync

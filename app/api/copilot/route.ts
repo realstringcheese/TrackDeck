@@ -18,28 +18,24 @@ export async function POST(req: NextRequest) {
       ? `Current playing track: "${currentTrackInfo.name}" by ${currentTrackInfo.artist} (Album: ${currentTrackInfo.album}). Status: ${currentTrackInfo.isPlaying ? 'Playing' : 'Paused'}.`
       : `No track is currently playing.`;
 
-    const systemInstruction = `You are TrackDeck's AI Music Companion: an elite music nerd, crate-digger, and audio production connoisseur with deep knowledge of hip-hop, trap, underground rap (Opium, Rage, Pluggnb), classic vinyl, and electronic music.
+    const systemInstruction = `You are TrackDeck's AI Music Companion: an elite music nerd and audio production connoisseur with deep knowledge of hip-hop, trap, underground rap (Opium, Rage, Pluggnb), classic vinyl, and electronic music.
 
 You have two jobs:
-1. Converse insightfully and concisely about music, beats, sound design, sample origins, and producer credits (e.g. Madlib, Metro Boomin, Pierre Bourne, BNYX, F1LTHY, Brandon Finessin, Star Boy, Outtatown, TM88). 
-- If you know the producer or sample for the current track, name them immediately and explain how they made the beat.
-- If it's a brand new release or underground leak and you don't have the exact liner notes, do NOT just say you don't know—break down the sonic style (e.g. 808 distortion, synth presets, hi-hat rolls) and name who that artist frequently collaborates with in that album era.
-2. If the user explicitly asks to control playback (e.g. skip, pause, play something, search a song), append a special JSON action tag at the very end of your response formatted exactly like this:
-<<<ACTION:{"type":"next"|"pause"|"play"|"search_play","query":"song or artist or empty"}>>>
+1. Converse insightfully and concisely about music, beats, sound design, sample origins, and producer credits (e.g. Madlib, Metro Boomin, Pierre Bourne, BNYX, F1LTHY, Brandon Finessin, Star Boy).
+2. PLAYBACK CONTROL:
+- When the user asks to play music (e.g. 'play some Uzi', 'put on Carti', 'play Drake', 'play One Beer', 'skip this'), ALWAYS immediately append the <<<ACTION>>> tag. 
+- DO NOT ask follow-up questions or ask for confirmation—execute immediately!
+Format: <<<ACTION:{"type":"next"|"pause"|"play"|"search_play","query":"artist, song, or album name"}>>>
 
 Context:
 ${trackContext}
 
 Rules:
-- Keep answers punchy, knowledgeable, and stylish (2-3 sentences max).
-- Never output markdown backticks around the <<<ACTION>>> tag.
-- Only include <<<ACTION>>> if the user gave an explicit command to change playback.`;
+- Keep answers punchy and knowledgeable (1-2 sentences).
+- Never output markdown backticks around the <<<ACTION>>> tag.`;
 
-    // ----------------------------------------------------
-    // ENGINE A: GROQ (Prioritize 120B / Largest Model)
-    // ----------------------------------------------------
     if (cleanKey.startsWith('gsk_')) {
-      let chosenModel = 'openai/gpt-oss-120b';
+      let chosenModel = 'qwen/qwen3.8-27b';
 
       try {
         const modelsRes = await fetch('https://api.groq.com/openai/v1/models', {
@@ -59,7 +55,6 @@ Rules:
             );
 
           if (validModels.length > 0) {
-            // Prioritize the smartest / highest parameter models available
             chosenModel =
               validModels.find((id: string) => id.includes('120b')) ||
               validModels.find((id: string) => id.includes('qwen3.8')) ||
@@ -68,7 +63,7 @@ Rules:
           }
         }
       } catch (e) {
-        console.warn('Groq model lookup failed, using 120b', e);
+        console.warn('Groq model lookup failed, using fallback', e);
       }
 
       const cleanMessages: { role: 'system' | 'user' | 'assistant'; content: string }[] = [
