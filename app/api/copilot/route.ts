@@ -14,30 +14,6 @@ export async function POST(req: NextRequest) {
 
     const cleanKey = apiKey.trim();
 
-    // 1. DYNAMIC MODEL DISCOVERY: Ask Google what models are valid for this exact key
-    let targetModel = 'gemini-2.0-flash';
-    try {
-      const listRes = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models?key=${cleanKey}`
-      );
-      if (listRes.ok) {
-        const listData = await listRes.json();
-        const available = listData.models || [];
-        // Find the first flash or pro model supporting generateContent
-        const validModel = available.find(
-          (m: { name: string; supportedGenerationMethods?: string[] }) =>
-            m.supportedGenerationMethods?.includes('generateContent') &&
-            (m.name.includes('flash') || m.name.includes('pro'))
-        );
-        if (validModel?.name) {
-          targetModel = validModel.name.replace(/^models\//, '');
-        }
-      }
-    } catch {
-      // Fallback to stable default
-      targetModel = 'gemini-2.0-flash';
-    }
-
     const trackContext = currentTrackInfo
       ? `Current playing track: "${currentTrackInfo.name}" by ${currentTrackInfo.artist} (Album: ${currentTrackInfo.album}). Status: ${currentTrackInfo.isPlaying ? 'Playing' : 'Paused'}.`
       : `No track is currently playing.`;
@@ -56,7 +32,7 @@ Rules:
 - Never output markdown backticks around the <<<ACTION>>> tag.
 - Only include <<<ACTION>>> if the user gave an explicit command to change playback.`;
 
-    // Sanitize conversation: must start with 'user' and alternate roles
+    // Ensure conversation strictly starts with 'user' and alternates roles
     const conversation: { role: 'user' | 'model'; parts: { text: string }[] }[] = [];
 
     const rawHistory = Array.isArray(history) ? history : [];
@@ -81,36 +57,50 @@ Rules:
       conversation.push({ role: 'user', parts: [{ text: prompt }] });
     }
 
-    // Call the verified working model
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${targetModel}:generateContent`;
+    // Google's active models for new keys
+    const modelsToTry = [
+      'gemini-3.8-flash',
+      'gemini-3.5-flash',
+      'gemini-flash-latest',
+    ];
 
-    const res = await fetch(url, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-goog-api-key': cleanKey,
-      },
-      body: JSON.stringify({
-        systemInstruction: { parts: [{ text: systemInstruction }] },
-        contents: conversation,
-        generationConfig: {
-          temperature: 0.7,
-          maxOutputTokens: 500,
+    let lastError = '';
+
+    for (const model of modelsToTry) {
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`;
+
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-goog-api-key': cleanKey,
         },
-      }),
-    });
+        body: JSON.stringify({
+          systemInstruction: { parts: [{ text: systemInstruction }] },
+          contents: conversation,
+          generationConfig: {
+            temperature: 0.7,
+            maxOutputTokens: 500,
+          },
+        }),
+      });
 
-    if (!res.ok) {
-      const errBody = await res.text();
-      return NextResponse.json(
-        { error: `Google API Error [${res.status}]: ${errBody}` },
-        { status: res.status }
-      );
+      if (!res.ok) {
+        lastError = await res.text();
+        continue;
+      }
+
+      const data = await res.json();
+      const rawText = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+      if (rawText) {
+        return NextResponse.json({ rawText });
+      }
     }
 
-    const data = await res.json();
-    const rawText = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
-    return NextResponse.json({ rawText });
+    return NextResponse.json(
+      { error: `Google API Error: ${lastError}` },
+      { status: 500 }
+    );
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : 'Internal server error';
     return NextResponse.json({ error: message }, { status: 500 });
