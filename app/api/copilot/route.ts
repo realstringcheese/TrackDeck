@@ -1,5 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
 
+// GET handler: so opening it in the browser confirms it works!
+export async function GET() {
+  return NextResponse.json({ status: 'TrackDeck Copilot API is live and ready!' });
+}
+
+// POST handler: handles the chat with Gemini
 export async function POST(req: NextRequest) {
   try {
     const { prompt, history, apiKey, currentTrackInfo } = await req.json();

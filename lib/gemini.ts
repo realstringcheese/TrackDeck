@@ -1,5 +1,3 @@
-// Client Caller -> Calls our Vercel Bridge Route (No School Firewall Block)
-
 export interface ChatMessage {
   role: 'user' | 'model';
   text: string;
@@ -12,7 +10,8 @@ export async function askGemini(
   apiKey: string,
   currentTrackInfo?: { name: string; artist: string; album: string; isPlaying: boolean } | null
 ): Promise<{ reply: string; action?: { type: string; query?: string } }> {
-  const res = await fetch('/api/chat', {
+  // Call our new unblocked /api/copilot endpoint
+  const res = await fetch('/api/copilot', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ prompt, history, apiKey, currentTrackInfo }),
