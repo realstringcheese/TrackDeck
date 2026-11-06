@@ -15,8 +15,9 @@ import {
   Check,
   Disc3,
   Volume2,
+  VolumeX,
+  Volume1,
   Radio,
-  Sliders,
   Smartphone,
   Flame,
   Moon,
@@ -48,15 +49,21 @@ export default function HomePage() {
     device?: string;
   } | null>(null);
 
+  // Volume State
+  const [volume, setVolume] = useState<number>(70);
+  const [prevVolume, setPrevVolume] = useState<number>(70);
+  const volumeDebounceTimer = useRef<NodeJS.Timeout | null>(null);
+
   // Chat State
   const [messages, setMessages] = useState<ChatMessage[]>([
     {
       role: 'model',
-      text: 'Yo! I’m your TrackDeck co-pilot. Connect your free Gemini key and we can talk music theory, decode samples, or switch up the vibe.',
+      text: 'Yo! I’m your TrackDeck co-pilot. Ask me anything about your music, ask about samples, or click a vibe chip below to switch up the tracks.',
     },
   ]);
   const [chatInput, setChatInput] = useState('');
   const [isAiLoading, setIsAiLoading] = useState(false);
+  const [isSkipping, setIsSkipping] = useState(false);
 
   const chatBottomRef = useRef<HTMLDivElement>(null);
 
@@ -83,12 +90,25 @@ export default function HomePage() {
     });
   }, []);
 
-  // Poll Spotify playback every 3 seconds
+  // Poll Spotify playback every 3 seconds for background updates
   useEffect(() => {
     if (!isAuthenticated) return;
     const interval = setInterval(fetchNowPlaying, 3000);
     return () => clearInterval(interval);
   }, [isAuthenticated]);
+
+  // Smooth local timer: advance the scrub bar every second without waiting for API
+  useEffect(() => {
+    if (!playback?.isPlaying) return;
+    const timer = setInterval(() => {
+      setPlayback((prev) => {
+        if (!prev || !prev.isPlaying) return prev;
+        const nextProgress = Math.min(prev.durationMs, prev.progressMs + 1000);
+        return { ...prev, progressMs: nextProgress };
+      });
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [playback?.isPlaying]);
 
   useEffect(() => {
     chatBottomRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -108,6 +128,9 @@ export default function HomePage() {
           durationMs: data.item.duration_ms || 1,
           device: data.device?.name || 'Active Device',
         });
+        if (typeof data.device?.volume_percent === 'number') {
+          setVolume(data.device.volume_percent);
+        }
       } else {
         setPlayback(null);
       }
@@ -116,26 +139,90 @@ export default function HomePage() {
     }
   }
 
-  // Playback Handlers
+  // --- 0ms INSTANT OPTIMISTIC PLAY/PAUSE ---
   async function togglePlay() {
     if (!playback) return;
-    if (playback.isPlaying) {
-      await spotifyFetch('/me/player/pause', { method: 'PUT' });
-      setPlayback((prev) => (prev ? { ...prev, isPlaying: false } : null));
-    } else {
-      await spotifyFetch('/me/player/play', { method: 'PUT' });
-      setPlayback((prev) => (prev ? { ...prev, isPlaying: true } : null));
+    const willPlay = !playback.isPlaying;
+
+    // 1. Instant 0ms visual switch
+    setPlayback((prev) => (prev ? { ...prev, isPlaying: willPlay } : null));
+
+    // 2. Background Spotify API call
+    try {
+      await spotifyFetch(willPlay ? '/me/player/play' : '/me/player/pause', {
+        method: 'PUT',
+      });
+    } catch {
+      // Revert if error occurs
+      setPlayback((prev) => (prev ? { ...prev, isPlaying: !willPlay } : null));
     }
   }
 
+  // --- RESPONSIVE NEXT / PREV ---
   async function handleNext() {
-    await spotifyFetch('/me/player/next', { method: 'POST' });
-    setTimeout(fetchNowPlaying, 500);
+    setIsSkipping(true);
+    try {
+      await spotifyFetch('/me/player/next', { method: 'POST' });
+      // Double rapid poll so the new song metadata arrives ASAP
+      setTimeout(fetchNowPlaying, 250);
+      setTimeout(fetchNowPlaying, 900);
+    } finally {
+      setTimeout(() => setIsSkipping(false), 300);
+    }
   }
 
   async function handlePrev() {
-    await spotifyFetch('/me/player/previous', { method: 'POST' });
-    setTimeout(fetchNowPlaying, 500);
+    setIsSkipping(true);
+    try {
+      await spotifyFetch('/me/player/previous', { method: 'POST' });
+      setTimeout(fetchNowPlaying, 250);
+      setTimeout(fetchNowPlaying, 900);
+    } finally {
+      setTimeout(() => setIsSkipping(false), 300);
+    }
+  }
+
+  // --- CLICK-TO-SEEK PROGRESS BAR ---
+  async function handleSeek(e: React.MouseEvent<HTMLDivElement>) {
+    if (!playback) return;
+    const rect = e.currentTarget.getBoundingClientRect();
+    const clickX = e.clientX - rect.left;
+    const ratio = Math.max(0, Math.min(1, clickX / rect.width));
+    const newPosMs = Math.floor(ratio * playback.durationMs);
+
+    // Instant local jump
+    setPlayback((prev) => (prev ? { ...prev, progressMs: newPosMs } : null));
+
+    // Send seek to Spotify
+    await spotifyFetch(`/me/player/seek?position_ms=${newPosMs}`, { method: 'PUT' });
+    setTimeout(fetchNowPlaying, 400);
+  }
+
+  // --- SMOOTH VOLUME CONTROL WITH DEBOUNCE ---
+  function handleVolumeChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const newVol = parseInt(e.target.value, 10);
+    setVolume(newVol);
+
+    if (volumeDebounceTimer.current) clearTimeout(volumeDebounceTimer.current);
+
+    // Debounce to prevent flooding Spotify API while dragging
+    volumeDebounceTimer.current = setTimeout(async () => {
+      await spotifyFetch(`/me/player/volume?volume_percent=${newVol}`, {
+        method: 'PUT',
+      });
+    }, 150);
+  }
+
+  async function toggleMute() {
+    if (volume > 0) {
+      setPrevVolume(volume);
+      setVolume(0);
+      await spotifyFetch('/me/player/volume?volume_percent=0', { method: 'PUT' });
+    } else {
+      const restore = prevVolume || 50;
+      setVolume(restore);
+      await spotifyFetch(`/me/player/volume?volume_percent=${restore}`, { method: 'PUT' });
+    }
   }
 
   function handleLogout() {
@@ -177,8 +264,14 @@ export default function HomePage() {
 
       if (response.action) {
         if (response.action.type === 'next') handleNext();
-        if (response.action.type === 'pause') spotifyFetch('/me/player/pause', { method: 'PUT' });
-        if (response.action.type === 'play') spotifyFetch('/me/player/play', { method: 'PUT' });
+        if (response.action.type === 'pause') {
+          setPlayback((p) => (p ? { ...p, isPlaying: false } : null));
+          spotifyFetch('/me/player/pause', { method: 'PUT' });
+        }
+        if (response.action.type === 'play') {
+          setPlayback((p) => (p ? { ...p, isPlaying: true } : null));
+          spotifyFetch('/me/player/play', { method: 'PUT' });
+        }
         if (response.action.type === 'search_play' && response.action.query) {
           const search = await spotifyFetch(
             `/search?q=${encodeURIComponent(response.action.query)}&type=track,playlist&limit=1`
@@ -189,7 +282,7 @@ export default function HomePage() {
               method: 'PUT',
               body: JSON.stringify({ uris: [uri] }),
             });
-            setTimeout(fetchNowPlaying, 800);
+            setTimeout(fetchNowPlaying, 700);
           }
         }
       }
@@ -313,31 +406,31 @@ export default function HomePage() {
 
               {/* Animated Equalizer when playing */}
               <div className="flex items-end gap-1 h-3.5">
-                <span className={`w-1 bg-emerald-400 rounded-full ${playback?.isPlaying ? 'h-full animate-[bounce_1s_infinite]' : 'h-1'}`} />
-                <span className={`w-1 bg-emerald-400 rounded-full ${playback?.isPlaying ? 'h-2/3 animate-[bounce_0.8s_infinite]' : 'h-1'}`} />
-                <span className={`w-1 bg-emerald-400 rounded-full ${playback?.isPlaying ? 'h-full animate-[bounce_1.2s_infinite]' : 'h-1'}`} />
+                <span className={`w-1 bg-emerald-400 rounded-full transition-all duration-300 ${playback?.isPlaying ? 'h-full animate-[bounce_1s_infinite]' : 'h-1 opacity-40'}`} />
+                <span className={`w-1 bg-emerald-400 rounded-full transition-all duration-300 ${playback?.isPlaying ? 'h-2/3 animate-[bounce_0.8s_infinite]' : 'h-1 opacity-40'}`} />
+                <span className={`w-1 bg-emerald-400 rounded-full transition-all duration-300 ${playback?.isPlaying ? 'h-full animate-[bounce_1.2s_infinite]' : 'h-1 opacity-40'}`} />
               </div>
             </div>
 
             {/* Glossy Album Card */}
-            <div className="relative aspect-square w-full max-w-[320px] mx-auto rounded-2xl overflow-hidden bg-black/60 border border-white/10 shadow-[0_20px_50px_rgba(0,0,0,0.8)] mb-8 group flex items-center justify-center">
+            <div className="relative aspect-square w-full max-w-[300px] mx-auto rounded-2xl overflow-hidden bg-black/60 border border-white/10 shadow-[0_20px_50px_rgba(0,0,0,0.8)] mb-6 group flex items-center justify-center">
               {playback?.albumArt ? (
                 <img
                   src={playback.albumArt}
                   alt={playback.name}
-                  className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-105"
+                  className={`w-full h-full object-cover transition-transform duration-700 group-hover:scale-105 ${isSkipping ? 'opacity-60 scale-95' : 'opacity-100'}`}
                 />
               ) : (
                 <div className="flex flex-col items-center gap-3 text-zinc-500 p-6 text-center">
                   <Music2 className="w-14 h-14 stroke-[1.25] text-zinc-600 animate-pulse" />
                   <p className="text-xs font-medium text-zinc-400">Spotify is Idle</p>
-                  <p className="text-[11px] text-zinc-500">Play any track on your phone to turn this deck on</p>
+                  <p className="text-[11px] text-zinc-500">Play any track on your phone to wake up this deck</p>
                 </div>
               )}
             </div>
 
             {/* Track Metadata */}
-            <div className="text-center space-y-1.5 px-4 mb-6">
+            <div className="text-center space-y-1 px-4 mb-5">
               <h2 className="font-bold text-xl tracking-tight text-white truncate">
                 {playback?.name || 'Awaiting Track...'}
               </h2>
@@ -349,11 +442,15 @@ export default function HomePage() {
               )}
             </div>
 
-            {/* Song Scrub Bar */}
+            {/* CLICKABLE Scrub Bar */}
             <div className="space-y-1.5 mb-6">
-              <div className="w-full bg-white/[0.08] h-1.5 rounded-full overflow-hidden">
+              <div
+                onClick={handleSeek}
+                className="w-full bg-white/[0.08] hover:bg-white/[0.12] h-2 rounded-full overflow-hidden cursor-pointer transition-colors relative group"
+                title="Click anywhere to jump"
+              >
                 <div
-                  className="bg-gradient-to-r from-emerald-500 to-teal-400 h-full rounded-full transition-all duration-300"
+                  className="bg-gradient-to-r from-emerald-500 to-teal-400 h-full rounded-full transition-[width] duration-150 ease-linear"
                   style={{ width: `${progressPercent}%` }}
                 />
               </div>
@@ -364,33 +461,63 @@ export default function HomePage() {
             </div>
           </div>
 
-          {/* Media Dock Controls */}
-          <div className="flex items-center justify-center gap-6 pt-2">
-            <button
-              onClick={handlePrev}
-              disabled={!playback}
-              className="p-3 text-zinc-400 hover:text-white hover:bg-white/[0.08] disabled:opacity-30 rounded-2xl transition-all"
-            >
-              <SkipBack className="w-6 h-6 fill-current" />
-            </button>
-            <button
-              onClick={togglePlay}
-              disabled={!playback}
-              className="p-5 bg-gradient-to-tr from-emerald-500 to-emerald-400 hover:from-emerald-400 hover:to-teal-300 disabled:opacity-30 text-black rounded-2xl shadow-xl shadow-emerald-500/25 transition-all hover:scale-105 active:scale-95"
-            >
-              {playback?.isPlaying ? (
-                <Pause className="w-7 h-7 fill-current" />
-              ) : (
-                <Play className="w-7 h-7 fill-current ml-0.5" />
-              )}
-            </button>
-            <button
-              onClick={handleNext}
-              disabled={!playback}
-              className="p-3 text-zinc-400 hover:text-white hover:bg-white/[0.08] disabled:opacity-30 rounded-2xl transition-all"
-            >
-              <SkipForward className="w-6 h-6 fill-current" />
-            </button>
+          <div>
+            {/* Media Dock Controls (0ms response) */}
+            <div className="flex items-center justify-center gap-6 mb-6">
+              <button
+                onClick={handlePrev}
+                disabled={!playback}
+                className="p-3 text-zinc-400 hover:text-white hover:bg-white/[0.08] active:scale-90 disabled:opacity-30 rounded-2xl transition-all"
+              >
+                <SkipBack className="w-6 h-6 fill-current" />
+              </button>
+              <button
+                onClick={togglePlay}
+                disabled={!playback}
+                className="p-5 bg-gradient-to-tr from-emerald-500 to-emerald-400 hover:from-emerald-400 hover:to-teal-300 disabled:opacity-30 text-black rounded-2xl shadow-xl shadow-emerald-500/25 transition-all hover:scale-105 active:scale-95"
+              >
+                {playback?.isPlaying ? (
+                  <Pause className="w-7 h-7 fill-current" />
+                ) : (
+                  <Play className="w-7 h-7 fill-current ml-0.5" />
+                )}
+              </button>
+              <button
+                onClick={handleNext}
+                disabled={!playback}
+                className="p-3 text-zinc-400 hover:text-white hover:bg-white/[0.08] active:scale-90 disabled:opacity-30 rounded-2xl transition-all"
+              >
+                <SkipForward className="w-6 h-6 fill-current" />
+              </button>
+            </div>
+
+            {/* Volume Control Bar */}
+            <div className="flex items-center gap-3 bg-black/30 border border-white/[0.06] rounded-2xl px-4 py-2.5">
+              <button
+                onClick={toggleMute}
+                className="text-zinc-400 hover:text-white transition-colors"
+                title="Mute / Unmute"
+              >
+                {volume === 0 ? (
+                  <VolumeX className="w-4 h-4 text-rose-400" />
+                ) : volume < 50 ? (
+                  <Volume1 className="w-4 h-4 text-zinc-300" />
+                ) : (
+                  <Volume2 className="w-4 h-4 text-emerald-400" />
+                )}
+              </button>
+              <input
+                type="range"
+                min="0"
+                max="100"
+                value={volume}
+                onChange={handleVolumeChange}
+                className="flex-1 h-1.5 bg-white/[0.1] rounded-lg appearance-none cursor-pointer accent-emerald-400 focus:outline-none"
+              />
+              <span className="text-[11px] font-mono text-zinc-400 w-8 text-right">
+                {volume}%
+              </span>
+            </div>
           </div>
         </section>
 
@@ -570,7 +697,17 @@ export default function HomePage() {
               </p>
 
               <div className="bg-black/50 p-4 rounded-2xl border border-white/[0.06] space-y-2 text-zinc-400">
-                <p>1. Open <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noreferrer" className="text-emerald-400 underline font-semibold inline-flex items-center gap-1">Google AI Studio <ExternalLink className="w-3 h-3" /></a></p>
+                <p>
+                  1. Open{' '}
+                  <a
+                    href="https://aistudio.google.com/app/apikey"
+                    target="_blank"
+                    rel="noreferrer"
+                    className="text-emerald-400 underline font-semibold inline-flex items-center gap-1"
+                  >
+                    Google AI Studio <ExternalLink className="w-3 h-3" />
+                  </a>
+                </p>
                 <p>2. Sign in with your normal Google account.</p>
                 <p>3. Click <strong>"Create API key"</strong> and copy it.</p>
               </div>
