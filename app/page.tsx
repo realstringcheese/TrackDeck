@@ -32,8 +32,8 @@ import {
   Flame,
   Snowflake,
   Tv,
-  Layers,
-  Sparkle,
+  Check,
+  Wand2,
 } from 'lucide-react';
 import { getAccessToken, spotifyFetch, redirectToSpotifyAuth, SpotifyAPI } from '@/lib/spotify';
 import { askGemini, ChatMessage, CopilotResponse } from '@/lib/gemini';
@@ -64,70 +64,109 @@ interface SpotifyDevice {
 
 type LayoutPreset = 'studio' | 'cinema';
 type ColorPreset = 'dark' | 'light' | 'neon' | 'aqua' | 'amber' | 'oled';
-type BgMode = 'album' | 'preset' | 'custom';
+type BgMode = 'album' | 'gallery' | 'custom';
 type WeatherEffect = 'none' | 'rain' | 'thunderstorm' | 'embers' | 'snow' | 'scanlines';
-type AtmosphereTab = 'vibes' | 'effects' | 'wallpaper' | 'appearance';
+type AtmosphereMode = 'presets' | 'custom_builder';
 
-// Curated All-In-One Vibe Packs (Wallpapers + Weather FX + Color Palettes + Blur/Dim)
-const VIBE_PACKS = [
+// Curated Wallpapers (Strictly Zero People, Pure Atmospheres)
+const GALLERY_WALLPAPERS = [
   {
-    id: 'thunderstorm',
+    id: 'thunderstorm-sky',
+    name: 'Night Lightning Storm',
+    url: 'https://images.unsplash.com/photo-1431440869543-efaf3388c585?q=80&w=1920&auto=format&fit=crop',
+  },
+  {
+    id: 'alpine-snow',
+    name: 'Alpine Snow Peaks',
+    url: 'https://images.unsplash.com/photo-1464822759023-fed622ff2c3b?q=80&w=1920&auto=format&fit=crop',
+  },
+  {
+    id: 'cozy-fireplace',
+    name: 'Burning Log Hearth',
+    url: 'https://images.unsplash.com/photo-1520414920679-92381bf112f0?q=80&w=1920&auto=format&fit=crop',
+  },
+  {
+    id: 'tokyo-neon-rain',
+    name: 'Tokyo Rain Reflections',
+    url: 'https://images.unsplash.com/photo-1514565131-fce0801e5785?q=80&w=1920&auto=format&fit=crop',
+  },
+  {
+    id: 'cyberpunk-city',
+    name: 'Cyberpunk Alley',
+    url: 'https://images.unsplash.com/photo-1508739773434-c26b3d09e071?q=80&w=1920&auto=format&fit=crop',
+  },
+  {
+    id: 'analog-turntable',
+    name: 'Vintage Vinyl Studio',
+    url: 'https://images.unsplash.com/photo-1539185441755-769473a23570?q=80&w=1920&auto=format&fit=crop',
+  },
+  {
+    id: 'deep-cosmos',
+    name: 'Deep Cosmos Nebula',
+    url: 'https://images.unsplash.com/photo-1534447677768-be436bb09401?q=80&w=1920&auto=format&fit=crop',
+  },
+];
+
+// Curated 1-Click Vibe Packs
+const VIBE_PRESETS = [
+  {
+    id: 'thunderstorm-pack',
     name: 'Midnight Thunderstorm',
-    tagline: 'Moody rain with distant lightning flashes',
-    url: 'https://images.unsplash.com/photo-1511289081-d06dda19034d?q=80&w=1920&auto=format&fit=crop',
+    desc: 'Fork lightning over storm clouds with falling rain & slate accents',
+    url: GALLERY_WALLPAPERS[0].url,
     effect: 'thunderstorm' as WeatherEffect,
     color: 'dark' as ColorPreset,
     blur: 6,
     dim: 50,
   },
   {
-    id: 'tokyo-rain',
-    name: 'Tokyo Lo-Fi Drizzle',
-    tagline: 'Neon night city with falling rain streaks',
-    url: 'https://images.unsplash.com/photo-1514565131-fce0801e5785?q=80&w=1920&auto=format&fit=crop',
-    effect: 'rain' as WeatherEffect,
-    color: 'neon' as ColorPreset,
-    blur: 8,
-    dim: 55,
-  },
-  {
-    id: 'blizzard',
+    id: 'alpine-pack',
     name: 'Alpine Blizzard',
-    tagline: 'Snowy misty pines with gentle flakes',
-    url: 'https://images.unsplash.com/photo-1491555103944-7c647fd857e6?q=80&w=1920&auto=format&fit=crop',
+    desc: 'Pristine snow-capped mountain valley with drifting snow & silver accents',
+    url: GALLERY_WALLPAPERS[1].url,
     effect: 'snow' as WeatherEffect,
     color: 'oled' as ColorPreset,
-    blur: 10,
+    blur: 8,
     dim: 45,
   },
   {
-    id: 'hearth',
-    name: 'Cozy Hearth & Embers',
-    tagline: 'Warm fireplace with rising golden embers',
-    url: 'https://images.unsplash.com/photo-1542838132-92c53300491e?q=80&w=1920&auto=format&fit=crop',
+    id: 'hearth-pack',
+    name: 'Cozy Hearth & Fire',
+    desc: 'Close-up crackling fireplace with rising embers & warm amber accents',
+    url: GALLERY_WALLPAPERS[2].url,
     effect: 'embers' as WeatherEffect,
     color: 'amber' as ColorPreset,
     blur: 10,
     dim: 55,
   },
   {
-    id: 'cyberpunk',
-    name: 'Cyberpunk Alley',
-    tagline: 'Neon city with retro CRT scanlines',
-    url: 'https://images.unsplash.com/photo-1508739773434-c26b3d09e071?q=80&w=1920&auto=format&fit=crop',
-    effect: 'scanlines' as WeatherEffect,
+    id: 'tokyo-pack',
+    name: 'Tokyo Lo-Fi Drizzle',
+    desc: 'Rainy neon crosswalk with gentle drizzle & cyberpunk neon accents',
+    url: GALLERY_WALLPAPERS[3].url,
+    effect: 'rain' as WeatherEffect,
     color: 'neon' as ColorPreset,
-    blur: 12,
-    dim: 60,
+    blur: 8,
+    dim: 55,
   },
   {
-    id: 'nebula',
-    name: 'Deep Cosmos Nebula',
-    tagline: 'Floating star dust across deep space',
-    url: 'https://images.unsplash.com/photo-1534447677768-be436bb09401?q=80&w=1920&auto=format&fit=crop',
+    id: 'vinyl-pack',
+    name: 'Analog Vinyl Lounge',
+    desc: 'Warm turntable gear with subtle scanlines & obsidian emerald accents',
+    url: GALLERY_WALLPAPERS[5].url,
+    effect: 'scanlines' as WeatherEffect,
+    color: 'dark' as ColorPreset,
+    blur: 12,
+    dim: 65,
+  },
+  {
+    id: 'cosmos-pack',
+    name: 'Deep Space Starfield',
+    desc: 'Starlight nebula with floating cosmic dust & oceanic aqua accents',
+    url: GALLERY_WALLPAPERS[6].url,
     effect: 'snow' as WeatherEffect,
     color: 'aqua' as ColorPreset,
-    blur: 14,
+    blur: 12,
     dim: 50,
   },
 ];
@@ -135,11 +174,13 @@ const VIBE_PACKS = [
 export default function HomePage() {
   const [layout, setLayout] = useState<LayoutPreset>('studio');
   const [colorTheme, setColorTheme] = useState<ColorPreset>('dark');
-  const [activeTab, setActiveTab] = useState<AtmosphereTab>('vibes');
 
-  // Background Customization
-  const [bgMode, setBgMode] = useState<BgMode>('preset');
-  const [bgPresetUrl, setBgPresetUrl] = useState(VIBE_PACKS[0].url);
+  // Atmosphere Modal Mode: 'presets' (1-Click) vs 'custom_builder' (Create from Scratch)
+  const [atmoMode, setAtmoMode] = useState<AtmosphereMode>('presets');
+
+  // Custom Deck Builder States
+  const [bgMode, setBgMode] = useState<BgMode>('gallery');
+  const [selectedGalleryUrl, setSelectedGalleryUrl] = useState(GALLERY_WALLPAPERS[0].url);
   const [bgCustomUrl, setBgCustomUrl] = useState('');
   const [bgBlur, setBgBlur] = useState<number>(8);
   const [bgDim, setBgDim] = useState<number>(50);
@@ -148,8 +189,8 @@ export default function HomePage() {
 
   // Weather FX State & Sliders
   const [weatherFx, setWeatherFx] = useState<WeatherEffect>('thunderstorm');
-  const [fxDensity, setFxDensity] = useState<number>(50); // 1 - 100
-  const [fxSpeed, setFxSpeed] = useState<number>(50); // 1 - 100
+  const [fxDensity, setFxDensity] = useState<number>(50);
+  const [fxSpeed, setFxSpeed] = useState<number>(50);
 
   // Modals
   const [isAuthenticated, setIsAuthenticated] = useState<boolean | null>(null);
@@ -199,7 +240,7 @@ export default function HomePage() {
   const [isAiLoading, setIsAiLoading] = useState(false);
   const chatBottomRef = useRef<HTMLDivElement>(null);
 
-  // 1. Initial Load & Hydration
+  // Initial Load
   useEffect(() => {
     const savedLayout = (localStorage.getItem('trackdeck_layout') as LayoutPreset) || 'studio';
     setLayout(savedLayout === 'studio' || savedLayout === 'cinema' ? savedLayout : 'studio');
@@ -207,11 +248,11 @@ export default function HomePage() {
     const savedColor = (localStorage.getItem('trackdeck_color_theme') as ColorPreset) || 'dark';
     setColorTheme(savedColor);
 
-    const savedBgMode = (localStorage.getItem('trackdeck_bg_mode') as BgMode) || 'preset';
+    const savedBgMode = (localStorage.getItem('trackdeck_bg_mode') as BgMode) || 'gallery';
     setBgMode(savedBgMode);
 
-    const savedBgPreset = localStorage.getItem('trackdeck_bg_preset') || VIBE_PACKS[0].url;
-    setBgPresetUrl(savedBgPreset);
+    const savedGalleryUrl = localStorage.getItem('trackdeck_bg_gallery') || GALLERY_WALLPAPERS[0].url;
+    setSelectedGalleryUrl(savedGalleryUrl);
 
     const savedBgCustom = localStorage.getItem('trackdeck_bg_custom') || '';
     setBgCustomUrl(savedBgCustom);
@@ -269,20 +310,21 @@ export default function HomePage() {
     });
   }, []);
 
-  function applyVibePack(pack: typeof VIBE_PACKS[0]) {
-    setBgMode('preset');
-    setBgPresetUrl(pack.url);
-    setWeatherFx(pack.effect);
-    setColorTheme(pack.color);
-    setBgBlur(pack.blur);
-    setBgDim(pack.dim);
+  // 1-Click Preset Handler
+  function applyVibePreset(preset: typeof VIBE_PRESETS[0]) {
+    setBgMode('gallery');
+    setSelectedGalleryUrl(preset.url);
+    setWeatherFx(preset.effect);
+    setColorTheme(preset.color);
+    setBgBlur(preset.blur);
+    setBgDim(preset.dim);
 
-    localStorage.setItem('trackdeck_bg_mode', 'preset');
-    localStorage.setItem('trackdeck_bg_preset', pack.url);
-    localStorage.setItem('trackdeck_weather_fx', pack.effect);
-    localStorage.setItem('trackdeck_color_theme', pack.color);
-    localStorage.setItem('trackdeck_bg_blur', String(pack.blur));
-    localStorage.setItem('trackdeck_bg_dim', String(pack.dim));
+    localStorage.setItem('trackdeck_bg_mode', 'gallery');
+    localStorage.setItem('trackdeck_bg_gallery', preset.url);
+    localStorage.setItem('trackdeck_weather_fx', preset.effect);
+    localStorage.setItem('trackdeck_color_theme', preset.color);
+    localStorage.setItem('trackdeck_bg_blur', String(preset.blur));
+    localStorage.setItem('trackdeck_bg_dim', String(preset.dim));
   }
 
   function changeLayout(newLayout: LayoutPreset) {
@@ -330,11 +372,11 @@ export default function HomePage() {
         canvas.height = h;
         const ctx = canvas.getContext('2d');
         ctx?.drawImage(img, 0, 0, w, h);
-        const compressedBase64 = canvas.toDataURL('image/jpeg', 0.8);
+        const compressed = canvas.toDataURL('image/jpeg', 0.8);
 
-        setBgCustomUrl(compressedBase64);
+        setBgCustomUrl(compressed);
         setBgMode('custom');
-        localStorage.setItem('trackdeck_bg_custom', compressedBase64);
+        localStorage.setItem('trackdeck_bg_custom', compressed);
         localStorage.setItem('trackdeck_bg_mode', 'custom');
       };
       img.src = event.target?.result as string;
@@ -343,7 +385,7 @@ export default function HomePage() {
   }
 
   // ========================================================
-  // REAL-TIME CANVAS WEATHER ENGINE (ZERO MOIRÉ / ZERO ARTIFACTS)
+  // REAL-TIME CANVAS WEATHER ENGINE (SMOOTH, ZERO MOIRÉ)
   // ========================================================
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -363,8 +405,7 @@ export default function HomePage() {
     };
     window.addEventListener('resize', handleResize);
 
-    // Particle setup based on sliders
-    const count = Math.floor(100 * (fxDensity / 50));
+    const count = Math.floor(120 * (fxDensity / 50));
     const speedMult = fxSpeed / 50;
 
     interface Particle {
@@ -382,45 +423,44 @@ export default function HomePage() {
       particles.push({
         x: Math.random() * width,
         y: Math.random() * height,
-        l: Math.random() * 20 + 10,
-        xs: -2 + Math.random() * 0.5,
-        ys: (Math.random() * 10 + 10) * speedMult,
-        size: Math.random() * 2.5 + 1,
-        opacity: Math.random() * 0.5 + 0.2,
+        l: Math.random() * 22 + 10,
+        xs: -1.5 + Math.random() * 0.4,
+        ys: (Math.random() * 10 + 12) * speedMult,
+        size: Math.random() * 2 + 1,
+        opacity: Math.random() * 0.45 + 0.25,
       });
     }
 
-    // Lightning Flash Timer
     let lightningOpacity = 0;
     let nextLightning = Date.now() + Math.random() * 6000 + 4000;
 
     const render = () => {
       ctx.clearRect(0, 0, width, height);
 
-      // 1. THUNDERSTORM / LIGHTNING FLASH
+      // LIGHTNING FLASH: Smooth atmospheric illumination (No lines!)
       if (weatherFx === 'thunderstorm') {
         const now = Date.now();
         if (now > nextLightning) {
-          lightningOpacity = 0.75;
-          nextLightning = now + Math.random() * 10000 + 6000;
+          lightningOpacity = 0.65;
+          nextLightning = now + Math.random() * 8000 + 5000;
         }
 
         if (lightningOpacity > 0.01) {
           ctx.fillStyle = `rgba(220, 235, 255, ${lightningOpacity})`;
           ctx.fillRect(0, 0, width, height);
-          lightningOpacity *= 0.88; // Smooth fade out
+          lightningOpacity *= 0.88;
         }
       }
 
-      // 2. RAIN / THUNDERSTORM STREAKS
+      // RAIN: Delicate, realistic streaks
       if (weatherFx === 'rain' || weatherFx === 'thunderstorm') {
-        ctx.strokeStyle = 'rgba(255, 255, 255, 0.45)';
-        ctx.lineWidth = 1.2;
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.4)';
+        ctx.lineWidth = 1.1;
         ctx.lineCap = 'round';
         ctx.beginPath();
         for (const p of particles) {
           ctx.moveTo(p.x, p.y);
-          ctx.lineTo(p.x + p.xs * 1.5, p.y + p.l);
+          ctx.lineTo(p.x + p.xs * 1.8, p.y + p.l);
         }
         ctx.stroke();
 
@@ -434,18 +474,18 @@ export default function HomePage() {
         }
       }
 
-      // 3. FLOATING EMBERS
+      // EMBERS: Floating glowing sparks
       if (weatherFx === 'embers') {
         for (const p of particles) {
           ctx.beginPath();
           ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
           ctx.fillStyle = `rgba(255, ${Math.floor(Math.random() * 120 + 80)}, 0, ${p.opacity})`;
-          ctx.shadowBlur = 8;
+          ctx.shadowBlur = 6;
           ctx.shadowColor = '#ff6600';
           ctx.fill();
 
-          p.y -= (p.ys * 0.25);
-          p.x += Math.sin(p.y * 0.02) * 0.8;
+          p.y -= p.ys * 0.22;
+          p.x += Math.sin(p.y * 0.02) * 0.7;
           if (p.y < -10) {
             p.y = height + 10;
             p.x = Math.random() * width;
@@ -453,16 +493,16 @@ export default function HomePage() {
         }
       }
 
-      // 4. SOFT DRIFTING SNOW
+      // SNOW: Soft drifting circles
       if (weatherFx === 'snow') {
-        ctx.fillStyle = 'rgba(255, 255, 255, 0.7)';
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.65)';
         ctx.shadowBlur = 0;
         for (const p of particles) {
           ctx.beginPath();
           ctx.arc(p.x, p.y, p.size * 1.2, 0, Math.PI * 2);
           ctx.fill();
 
-          p.y += p.ys * 0.2;
+          p.y += p.ys * 0.22;
           p.x += Math.sin(p.y * 0.01) * 0.5;
           if (p.y > height) {
             p.y = -5;
@@ -482,7 +522,7 @@ export default function HomePage() {
     };
   }, [weatherFx, fxDensity, fxSpeed]);
 
-  // Polling
+  // Polling & Queue
   useEffect(() => {
     if (!isAuthenticated) return;
     const interval = setInterval(fetchNowPlaying, 1500);
@@ -495,7 +535,7 @@ export default function HomePage() {
     return () => clearInterval(interval);
   }, [isAuthenticated]);
 
-  // Scrub Bar Ticking
+  // Scrub Ticking
   useEffect(() => {
     if (!playback?.isPlaying) return;
     const timer = setInterval(() => {
@@ -749,6 +789,7 @@ export default function HomePage() {
       setTimeout(() => {
         isActionPending.current = false;
         fetchNowPlaying();
+        loadQueue();
       }, 500);
     }
   }
@@ -959,11 +1000,12 @@ export default function HomePage() {
 
   const theme = themeClasses[colorTheme];
 
+  // Active Background Image Resolver
   const activeBgImage =
     bgMode === 'custom' && bgCustomUrl
       ? bgCustomUrl
-      : bgMode === 'preset'
-      ? bgPresetUrl
+      : bgMode === 'gallery'
+      ? selectedGalleryUrl
       : playback?.albumArt || '';
 
   return (
@@ -971,11 +1013,11 @@ export default function HomePage() {
       className={`h-screen w-screen overflow-hidden flex flex-col font-sans select-none transition-colors duration-500 ${theme.root}`}
     >
       {/* ======================================================== */}
-      {/* 0. DYNAMIC BACKGROUND & REAL-TIME WEATHER CANVAS         */}
+      {/* 0. REAL-TIME BACKGROUND & SMOOTH WEATHER CANVAS          */}
       {/* ======================================================== */}
       {activeBgImage && (
         <div className="fixed inset-0 pointer-events-none z-0 overflow-hidden">
-          {/* Background Wallpaper with Smooth Blur & Crop */}
+          {/* Background Wallpaper */}
           <div
             className="absolute inset-0 transition-all duration-700"
             style={{
@@ -988,7 +1030,7 @@ export default function HomePage() {
             }}
           />
 
-          {/* Darkness Tint Layer for HUD Readability */}
+          {/* Darkness Dimming Tint Overlay */}
           <div
             className="absolute inset-0 transition-opacity duration-500"
             style={{
@@ -997,15 +1039,15 @@ export default function HomePage() {
             }}
           />
 
-          {/* THE CLEAN CANVAS SHADER: RAIN, THUNDERSTORM, EMBERS, SNOW */}
+          {/* THE CLEAN 2D CANVAS SHADER (ZERO MOIRÉ LINES) */}
           <canvas ref={canvasRef} className="absolute inset-0 pointer-events-none" />
 
           {/* CRT Scanline Overlay */}
           {weatherFx === 'scanlines' && (
             <div
-              className="absolute inset-0 pointer-events-none opacity-25"
+              className="absolute inset-0 pointer-events-none opacity-20"
               style={{
-                backgroundImage: 'linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.4) 50%)',
+                backgroundImage: 'linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.45) 50%)',
                 backgroundSize: '100% 4px',
               }}
             />
@@ -1057,10 +1099,10 @@ export default function HomePage() {
 
         {/* Right Actions */}
         <div className="flex items-center gap-1.5">
-          {/* Atmosphere Palette Button */}
+          {/* Atmosphere Studio Button */}
           <button
             onClick={() => setShowAtmosphereModal(true)}
-            title="Atmosphere Studio & FX"
+            title="Atmosphere & Deck Customizer"
             className="p-1.5 rounded-lg hover:bg-white/10 transition-colors flex items-center gap-1 text-xs"
           >
             <Palette className="w-4 h-4 text-emerald-500" />
@@ -1294,7 +1336,7 @@ export default function HomePage() {
             </div>
           </div>
 
-          {/* LOWER DECK: WIDE CHAT */}
+          {/* LOWER DECK: CHAT */}
           <div
             className={`w-full mx-auto border rounded-2xl backdrop-blur-2xl flex flex-col justify-between p-3 shrink-0 shadow-lg h-[20vh] max-w-3xl transition-all duration-300 ${theme.panel}`}
           >
@@ -1384,18 +1426,18 @@ export default function HomePage() {
       </div>
 
       {/* ======================================================== */}
-      {/* ATMOSPHERE STUDIO MODAL (TABBED FIGMA/APPLE GRADE UX)    */}
+      {/* ATMOSPHERE STUDIO MODAL (PRESETS vs CUSTOM DECK BUILDER) */}
       {/* ======================================================== */}
       {showAtmosphereModal && (
         <div className="fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex items-center justify-center p-4">
           <div className={`w-full max-w-xl rounded-3xl p-6 shadow-2xl space-y-5 border max-h-[90vh] flex flex-col ${theme.modal}`}>
-            {/* Header & Close */}
+            {/* Header */}
             <div className="flex items-center justify-between border-b pb-3 border-inherit shrink-0">
               <div className="flex items-center gap-2">
                 <Palette className="w-5 h-5 text-emerald-500" />
                 <div>
-                  <h3 className="font-bold text-sm">Atmosphere & Deck Studio</h3>
-                  <p className="text-[10px] opacity-60">Personalize vibes, shaders, and deck layout</p>
+                  <h3 className="font-bold text-sm">Atmosphere & Deck Customizer</h3>
+                  <p className="text-[10px] opacity-60">Pick a ready-to-use vibe or build your own custom UI from scratch</p>
                 </div>
               </div>
               <button onClick={() => setShowAtmosphereModal(false)} className="opacity-50 hover:opacity-100 p-1">
@@ -1403,210 +1445,81 @@ export default function HomePage() {
               </button>
             </div>
 
-            {/* TAB SELECTOR BAR */}
-            <div className="flex items-center gap-1 bg-black/20 p-1 rounded-2xl border border-inherit shrink-0">
+            {/* TOP-LEVEL MODE TOGGLE: [ 1-CLICK PRESETS ] vs [ BUILD YOUR OWN FROM SCRATCH ] */}
+            <div className="grid grid-cols-2 gap-2 bg-black/25 p-1 rounded-2xl border border-inherit shrink-0">
               <button
-                onClick={() => setActiveTab('vibes')}
-                className={`flex-1 py-1.5 px-3 rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 transition-all ${
-                  activeTab === 'vibes' ? theme.accentBtn : 'opacity-70 hover:opacity-100'
+                onClick={() => setAtmoMode('presets')}
+                className={`py-2 px-3 rounded-xl text-xs font-bold flex items-center justify-center gap-2 transition-all ${
+                  atmoMode === 'presets' ? theme.accentBtn : 'opacity-70 hover:opacity-100'
                 }`}
               >
-                <Sparkle className="w-3.5 h-3.5" /> All-In-One Vibes
+                <Wand2 className="w-3.5 h-3.5" /> 1-Click Vibe Presets
               </button>
-
               <button
-                onClick={() => setActiveTab('effects')}
-                className={`flex-1 py-1.5 px-3 rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 transition-all ${
-                  activeTab === 'effects' ? theme.accentBtn : 'opacity-70 hover:opacity-100'
+                onClick={() => setAtmoMode('custom_builder')}
+                className={`py-2 px-3 rounded-xl text-xs font-bold flex items-center justify-center gap-2 transition-all ${
+                  atmoMode === 'custom_builder' ? theme.accentBtn : 'opacity-70 hover:opacity-100'
                 }`}
               >
-                <Zap className="w-3.5 h-3.5" /> Live Weather FX
-              </button>
-
-              <button
-                onClick={() => setActiveTab('wallpaper')}
-                className={`flex-1 py-1.5 px-3 rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 transition-all ${
-                  activeTab === 'wallpaper' ? theme.accentBtn : 'opacity-70 hover:opacity-100'
-                }`}
-              >
-                <ImageIcon className="w-3.5 h-3.5" /> Wallpaper
-              </button>
-
-              <button
-                onClick={() => setActiveTab('appearance')}
-                className={`flex-1 py-1.5 px-3 rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 transition-all ${
-                  activeTab === 'appearance' ? theme.accentBtn : 'opacity-70 hover:opacity-100'
-                }`}
-              >
-                <Layers className="w-3.5 h-3.5" /> Deck & Colors
+                <Sliders className="w-3.5 h-3.5" /> Build Custom UI (From Scratch)
               </button>
             </div>
 
-            {/* TAB CONTENT (SCROLLABLE) */}
+            {/* CONTENT AREA */}
             <div className="flex-1 overflow-y-auto pr-1 space-y-4">
-              
-              {/* TAB 1: ALL-IN-ONE VIBE PACKS */}
-              {activeTab === 'vibes' && (
-                <div className="space-y-2">
-                  <p className="text-xs opacity-60">One click sets wallpaper, real-time weather shaders, and matching colors.</p>
+              {/* ==================================================== */}
+              {/* MODE 1: 1-CLICK VIBE PRESETS (SEPARATE & SIMPLE)    */}
+              {/* ==================================================== */}
+              {atmoMode === 'presets' ? (
+                <div className="space-y-2.5">
+                  <p className="text-xs opacity-60">Curated, complete aesthetics. One click sets image, live weather shaders, and matching colors.</p>
                   <div className="grid grid-cols-2 gap-2.5">
-                    {VIBE_PACKS.map((pack) => (
+                    {VIBE_PRESETS.map((preset) => (
                       <button
-                        key={pack.id}
-                        onClick={() => applyVibePack(pack)}
+                        key={preset.id}
+                        onClick={() => applyVibePreset(preset)}
                         className={`group p-2.5 rounded-2xl border text-left flex gap-3 items-center transition-all ${
-                          bgPresetUrl === pack.url && weatherFx === pack.effect
+                          selectedGalleryUrl === preset.url && weatherFx === preset.effect
                             ? 'border-emerald-500 ring-2 ring-emerald-500/20 bg-emerald-500/10'
                             : 'border-white/10 hover:border-white/25 hover:bg-white/5'
                         }`}
                       >
-                        <img src={pack.url} alt={pack.name} className="w-16 h-16 rounded-xl object-cover shrink-0 shadow-md group-hover:scale-105 transition-transform" />
+                        <img src={preset.url} alt={preset.name} className="w-16 h-16 rounded-xl object-cover shrink-0 shadow-md group-hover:scale-105 transition-transform" />
                         <div className="truncate flex-1">
-                          <p className="font-bold text-xs truncate">{pack.name}</p>
-                          <p className="text-[10px] opacity-60 leading-tight line-clamp-2 mt-0.5">{pack.tagline}</p>
+                          <p className="font-bold text-xs truncate flex items-center justify-between">
+                            {preset.name}
+                            {selectedGalleryUrl === preset.url && weatherFx === preset.effect && (
+                              <Check className="w-3.5 h-3.5 text-emerald-500 shrink-0" />
+                            )}
+                          </p>
+                          <p className="text-[10px] opacity-60 leading-tight line-clamp-2 mt-0.5">{preset.desc}</p>
                         </div>
                       </button>
                     ))}
                   </div>
                 </div>
-              )}
+              ) : (
+                /* ==================================================== */
+                /* MODE 2: CUSTOM DECK BUILDER (BUILD FROM ZERO)       */
+                /* ==================================================== */
+                <div className="space-y-5">
+                  {/* STEP 1: WALLPAPER SOURCE */}
+                  <div className="space-y-2.5">
+                    <label className="text-[11px] font-mono uppercase tracking-wider opacity-70 flex items-center gap-1.5 font-bold">
+                      <ImageIcon className="w-3.5 h-3.5 text-emerald-500" /> 1. Select Wallpaper Source
+                    </label>
 
-              {/* TAB 2: LIVE WEATHER FX & PARTICLE SLIDERS */}
-              {activeTab === 'effects' && (
-                <div className="space-y-4">
-                  <div className="space-y-2">
-                    <label className="text-[11px] font-mono uppercase tracking-wider opacity-60">Choose Active Weather Shader</label>
-                    <div className="grid grid-cols-3 gap-2">
-                      <button
-                        onClick={() => changeWeatherFx('none')}
-                        className={`p-2.5 rounded-xl border text-xs font-semibold flex items-center justify-center gap-1.5 transition-all ${
-                          weatherFx === 'none' ? 'border-emerald-500 bg-emerald-500/10' : 'border-white/10'
-                        }`}
-                      >
-                        None
-                      </button>
-                      <button
-                        onClick={() => changeWeatherFx('rain')}
-                        className={`p-2.5 rounded-xl border text-xs font-semibold flex items-center justify-center gap-1.5 transition-all ${
-                          weatherFx === 'rain' ? 'border-cyan-400 bg-cyan-400/10 text-cyan-300' : 'border-white/10'
-                        }`}
-                      >
-                        <CloudRain className="w-3.5 h-3.5" /> Rain Streaks
-                      </button>
-                      <button
-                        onClick={() => changeWeatherFx('thunderstorm')}
-                        className={`p-2.5 rounded-xl border text-xs font-semibold flex items-center justify-center gap-1.5 transition-all ${
-                          weatherFx === 'thunderstorm' ? 'border-amber-400 bg-amber-400/10 text-amber-300' : 'border-white/10'
-                        }`}
-                      >
-                        <Zap className="w-3.5 h-3.5" /> Storm + Flash
-                      </button>
-                      <button
-                        onClick={() => changeWeatherFx('embers')}
-                        className={`p-2.5 rounded-xl border text-xs font-semibold flex items-center justify-center gap-1.5 transition-all ${
-                          weatherFx === 'embers' ? 'border-orange-500 bg-orange-500/10 text-orange-300' : 'border-white/10'
-                        }`}
-                      >
-                        <Flame className="w-3.5 h-3.5" /> Embers
-                      </button>
-                      <button
-                        onClick={() => changeWeatherFx('snow')}
-                        className={`p-2.5 rounded-xl border text-xs font-semibold flex items-center justify-center gap-1.5 transition-all ${
-                          weatherFx === 'snow' ? 'border-sky-300 bg-sky-300/10 text-sky-200' : 'border-white/10'
-                        }`}
-                      >
-                        <Snowflake className="w-3.5 h-3.5" /> Snow
-                      </button>
-                      <button
-                        onClick={() => changeWeatherFx('scanlines')}
-                        className={`p-2.5 rounded-xl border text-xs font-semibold flex items-center justify-center gap-1.5 transition-all ${
-                          weatherFx === 'scanlines' ? 'border-emerald-400 bg-emerald-400/10 text-emerald-300' : 'border-white/10'
-                        }`}
-                      >
-                        <Tv className="w-3.5 h-3.5" /> CRT Scanlines
-                      </button>
-                    </div>
-                  </div>
-
-                  {/* SLIDERS FOR SPEED & DENSITY */}
-                  {weatherFx !== 'none' && weatherFx !== 'scanlines' && (
-                    <div className="space-y-3.5 border-t pt-4 border-inherit">
-                      <label className="text-[11px] font-mono uppercase tracking-wider opacity-60 flex items-center gap-1.5">
-                        <Sliders className="w-3.5 h-3.5" /> Particle Physics Sliders
-                      </label>
-
-                      {/* Density Slider */}
-                      <div className="space-y-1">
-                        <div className="flex justify-between text-xs">
-                          <span>Particle Density / Intensity</span>
-                          <span className="font-mono opacity-60">{fxDensity}%</span>
-                        </div>
-                        <input
-                          type="range"
-                          min="10"
-                          max="100"
-                          value={fxDensity}
-                          onChange={(e) => {
-                            const val = Number(e.target.value);
-                            setFxDensity(val);
-                            updateParam('trackdeck_fx_density', val);
-                          }}
-                          className="w-full h-1.5 bg-white/10 rounded-lg appearance-none cursor-pointer accent-emerald-500"
-                        />
-                      </div>
-
-                      {/* Speed Slider */}
-                      <div className="space-y-1">
-                        <div className="flex justify-between text-xs">
-                          <span>Wind & Fall Speed</span>
-                          <span className="font-mono opacity-60">{fxSpeed}%</span>
-                        </div>
-                        <input
-                          type="range"
-                          min="10"
-                          max="100"
-                          value={fxSpeed}
-                          onChange={(e) => {
-                            const val = Number(e.target.value);
-                            setFxSpeed(val);
-                            updateParam('trackdeck_fx_speed', val);
-                          }}
-                          className="w-full h-1.5 bg-white/10 rounded-lg appearance-none cursor-pointer accent-emerald-500"
-                        />
-                      </div>
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {/* TAB 3: WALLPAPER & CAMERA SLIDERS */}
-              {activeTab === 'wallpaper' && (
-                <div className="space-y-4">
-                  {/* Wallpaper Source */}
-                  <div className="space-y-2">
-                    <label className="text-[11px] font-mono uppercase tracking-wider opacity-60">Wallpaper Source</label>
                     <div className="grid grid-cols-3 gap-2">
                       <button
                         onClick={() => {
-                          setBgMode('preset');
-                          updateParam('trackdeck_bg_mode', 'preset');
+                          setBgMode('gallery');
+                          updateParam('trackdeck_bg_mode', 'gallery');
                         }}
                         className={`p-2.5 rounded-xl border text-xs font-semibold transition-all ${
-                          bgMode === 'preset' ? 'border-emerald-500 bg-emerald-500/10' : 'border-white/10'
+                          bgMode === 'gallery' ? 'border-emerald-500 bg-emerald-500/10' : 'border-white/10'
                         }`}
                       >
-                        Curated Scenes
-                      </button>
-                      <button
-                        onClick={() => {
-                          setBgMode('album');
-                          updateParam('trackdeck_bg_mode', 'album');
-                        }}
-                        className={`p-2.5 rounded-xl border text-xs font-semibold transition-all ${
-                          bgMode === 'album' ? 'border-emerald-500 bg-emerald-500/10' : 'border-white/10'
-                        }`}
-                      >
-                        Album Glow
+                        Aesthetic Gallery
                       </button>
                       <button
                         onClick={() => {
@@ -1619,25 +1532,61 @@ export default function HomePage() {
                       >
                         Upload Photo
                       </button>
+                      <button
+                        onClick={() => {
+                          setBgMode('album');
+                          updateParam('trackdeck_bg_mode', 'album');
+                        }}
+                        className={`p-2.5 rounded-xl border text-xs font-semibold transition-all ${
+                          bgMode === 'album' ? 'border-emerald-500 bg-emerald-500/10' : 'border-white/10'
+                        }`}
+                      >
+                        Album Glow
+                      </button>
                     </div>
+
+                    {/* Gallery Images Grid */}
+                    {bgMode === 'gallery' && (
+                      <div className="grid grid-cols-4 gap-2 pt-1">
+                        {GALLERY_WALLPAPERS.map((img) => (
+                          <button
+                            key={img.id}
+                            onClick={() => {
+                              setSelectedGalleryUrl(img.url);
+                              updateParam('trackdeck_bg_gallery', img.url);
+                            }}
+                            className={`relative aspect-video rounded-xl overflow-hidden border transition-all group ${
+                              selectedGalleryUrl === img.url ? 'border-emerald-500 ring-2 ring-emerald-500/40' : 'border-white/10'
+                            }`}
+                          >
+                            <img src={img.url} alt={img.name} className="w-full h-full object-cover group-hover:scale-105 transition-transform" />
+                            <div className="absolute inset-0 bg-black/40 flex items-end p-1">
+                              <span className="text-[9px] font-bold text-white truncate">{img.name}</span>
+                            </div>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+
+                    {/* Custom Upload */}
+                    {bgMode === 'custom' && (
+                      <div className="pt-1 space-y-2">
+                        <label className="border-2 border-dashed border-white/20 hover:border-emerald-500 rounded-2xl p-4 flex flex-col items-center justify-center cursor-pointer transition-colors bg-white/[0.02]">
+                          <Upload className="w-6 h-6 text-emerald-500 mb-1" />
+                          <span className="text-xs font-semibold">Upload Photo from Chromebook</span>
+                          <span className="text-[10px] opacity-50">Auto-compressed into browser memory</span>
+                          <input type="file" accept="image/*" onChange={handleImageUpload} className="hidden" />
+                        </label>
+                        {bgCustomUrl && <p className="text-[10px] text-emerald-400 font-mono text-center">✓ Custom photo loaded</p>}
+                      </div>
+                    )}
                   </div>
 
-                  {/* Custom Upload */}
-                  {bgMode === 'custom' && (
-                    <div className="pt-1 space-y-2">
-                      <label className="border-2 border-dashed border-white/20 hover:border-emerald-500 rounded-2xl p-4 flex flex-col items-center justify-center cursor-pointer transition-colors bg-white/[0.02]">
-                        <Upload className="w-6 h-6 text-emerald-500 mb-1" />
-                        <span className="text-xs font-semibold">Upload Photo from Chromebook</span>
-                        <span className="text-[10px] opacity-50">Auto-compressed into browser storage</span>
-                        <input type="file" accept="image/*" onChange={handleImageUpload} className="hidden" />
-                      </label>
-                      {bgCustomUrl && <p className="text-[10px] text-emerald-400 font-mono text-center">✓ Photo active</p>}
-                    </div>
-                  )}
-
-                  {/* SLIDERS FOR BLUR, DIM, CROP & SCALE */}
-                  <div className="space-y-3.5 border-t pt-3 border-inherit">
-                    <label className="text-[11px] font-mono uppercase tracking-wider opacity-60">Wallpaper Adjustment Controls</label>
+                  {/* STEP 2: CAMERA & SLIDERS */}
+                  <div className="space-y-3 border-t pt-4 border-inherit">
+                    <label className="text-[11px] font-mono uppercase tracking-wider opacity-70 flex items-center gap-1.5 font-bold">
+                      <Sliders className="w-3.5 h-3.5 text-emerald-500" /> 2. Wallpaper Camera & Focus Sliders
+                    </label>
 
                     {/* Blur */}
                     <div className="space-y-1">
@@ -1659,10 +1608,10 @@ export default function HomePage() {
                       />
                     </div>
 
-                    {/* Darkness Tint */}
+                    {/* Dimming */}
                     <div className="space-y-1">
                       <div className="flex justify-between text-xs">
-                        <span>Darkness Tint (HUD Contrast)</span>
+                        <span>Dark Tint (Contrast with HUD)</span>
                         <span className="font-mono opacity-60">{bgDim}%</span>
                       </div>
                       <input
@@ -1679,10 +1628,10 @@ export default function HomePage() {
                       />
                     </div>
 
-                    {/* Vertical Crop Focus */}
+                    {/* Vertical Crop */}
                     <div className="space-y-1">
                       <div className="flex justify-between text-xs">
-                        <span>Vertical Framing / Crop</span>
+                        <span>Vertical Crop Position</span>
                         <span className="font-mono opacity-60">
                           {bgPosY < 35 ? 'Top' : bgPosY > 65 ? 'Bottom' : 'Center'} ({bgPosY}%)
                         </span>
@@ -1701,7 +1650,7 @@ export default function HomePage() {
                       />
                     </div>
 
-                    {/* Scale */}
+                    {/* Zoom */}
                     <div className="space-y-1">
                       <div className="flex justify-between text-xs">
                         <span>Zoom / Scale</span>
@@ -1721,50 +1670,123 @@ export default function HomePage() {
                       />
                     </div>
                   </div>
-                </div>
-              )}
 
-              {/* TAB 4: DECK THEME & LAYOUT */}
-              {activeTab === 'appearance' && (
-                <div className="space-y-4">
-                  {/* Layout Mode */}
-                  <div className="space-y-2">
-                    <label className="text-[11px] font-mono uppercase tracking-wider opacity-60">Layout View</label>
-                    <div className="grid grid-cols-2 gap-2.5">
+                  {/* STEP 3: LIVE WEATHER FX */}
+                  <div className="space-y-3 border-t pt-4 border-inherit">
+                    <label className="text-[11px] font-mono uppercase tracking-wider opacity-70 flex items-center gap-1.5 font-bold">
+                      <CloudRain className="w-3.5 h-3.5 text-cyan-400" /> 3. Live Real-Time Weather Shaders
+                    </label>
+
+                    <div className="grid grid-cols-3 gap-2">
                       <button
-                        onClick={() => changeLayout('studio')}
-                        className={`p-3 rounded-2xl border text-left space-y-1 transition-all ${
-                          layout === 'studio'
-                            ? 'border-emerald-500 ring-2 ring-emerald-500/20 bg-emerald-500/10'
-                            : 'border-white/10 hover:border-white/20'
-                        }`}
+                        onClick={() => changeWeatherFx('none')}
+                        className={`p-2 rounded-xl border text-xs font-semibold ${weatherFx === 'none' ? 'border-emerald-500 bg-emerald-500/10' : 'border-white/10'}`}
                       >
-                        <p className="font-bold text-xs flex items-center justify-between">
-                          Studio Deck <LayoutGrid className="w-3.5 h-3.5 opacity-60" />
-                        </p>
-                        <p className="text-[10px] opacity-60 leading-tight">3-column command center with playlists & queue.</p>
+                        None
                       </button>
-
                       <button
-                        onClick={() => changeLayout('cinema')}
-                        className={`p-3 rounded-2xl border text-left space-y-1 transition-all ${
-                          layout === 'cinema'
-                            ? 'border-emerald-500 ring-2 ring-emerald-500/20 bg-emerald-500/10'
-                            : 'border-white/10 hover:border-white/20'
-                        }`}
+                        onClick={() => changeWeatherFx('rain')}
+                        className={`p-2 rounded-xl border text-xs font-semibold flex items-center justify-center gap-1 ${weatherFx === 'rain' ? 'border-cyan-400 bg-cyan-400/10 text-cyan-300' : 'border-white/10'}`}
                       >
-                        <p className="font-bold text-xs flex items-center justify-between">
-                          Cinema Focus <Maximize2 className="w-3.5 h-3.5 opacity-60" />
-                        </p>
-                        <p className="text-[10px] opacity-60 leading-tight">Sidebars hidden. Grand album art centerpiece.</p>
+                        <CloudRain className="w-3.5 h-3.5" /> Rain
+                      </button>
+                      <button
+                        onClick={() => changeWeatherFx('thunderstorm')}
+                        className={`p-2 rounded-xl border text-xs font-semibold flex items-center justify-center gap-1 ${weatherFx === 'thunderstorm' ? 'border-amber-400 bg-amber-400/10 text-amber-300' : 'border-white/10'}`}
+                      >
+                        <Zap className="w-3.5 h-3.5" /> Storm + Flash
+                      </button>
+                      <button
+                        onClick={() => changeWeatherFx('embers')}
+                        className={`p-2 rounded-xl border text-xs font-semibold flex items-center justify-center gap-1 ${weatherFx === 'embers' ? 'border-orange-500 bg-orange-500/10 text-orange-300' : 'border-white/10'}`}
+                      >
+                        <Flame className="w-3.5 h-3.5" /> Embers
+                      </button>
+                      <button
+                        onClick={() => changeWeatherFx('snow')}
+                        className={`p-2 rounded-xl border text-xs font-semibold flex items-center justify-center gap-1 ${weatherFx === 'snow' ? 'border-sky-300 bg-sky-300/10 text-sky-200' : 'border-white/10'}`}
+                      >
+                        <Snowflake className="w-3.5 h-3.5" /> Snow
+                      </button>
+                      <button
+                        onClick={() => changeWeatherFx('scanlines')}
+                        className={`p-2 rounded-xl border text-xs font-semibold flex items-center justify-center gap-1 ${weatherFx === 'scanlines' ? 'border-emerald-400 bg-emerald-400/10 text-emerald-300' : 'border-white/10'}`}
+                      >
+                        <Tv className="w-3.5 h-3.5" /> CRT Scanlines
                       </button>
                     </div>
+
+                    {weatherFx !== 'none' && weatherFx !== 'scanlines' && (
+                      <div className="space-y-3 pt-2">
+                        <div className="space-y-1">
+                          <div className="flex justify-between text-xs">
+                            <span>Particle Density</span>
+                            <span className="font-mono opacity-60">{fxDensity}%</span>
+                          </div>
+                          <input
+                            type="range"
+                            min="10"
+                            max="100"
+                            value={fxDensity}
+                            onChange={(e) => {
+                              const val = Number(e.target.value);
+                              setFxDensity(val);
+                              updateParam('trackdeck_fx_density', val);
+                            }}
+                            className="w-full h-1.5 bg-white/10 rounded-lg appearance-none cursor-pointer accent-emerald-500"
+                          />
+                        </div>
+
+                        <div className="space-y-1">
+                          <div className="flex justify-between text-xs">
+                            <span>Fall Speed</span>
+                            <span className="font-mono opacity-60">{fxSpeed}%</span>
+                          </div>
+                          <input
+                            type="range"
+                            min="10"
+                            max="100"
+                            value={fxSpeed}
+                            onChange={(e) => {
+                              const val = Number(e.target.value);
+                              setFxSpeed(val);
+                              updateParam('trackdeck_fx_speed', val);
+                            }}
+                            className="w-full h-1.5 bg-white/10 rounded-lg appearance-none cursor-pointer accent-emerald-500"
+                          />
+                        </div>
+                      </div>
+                    )}
                   </div>
 
-                  {/* Color Swatches */}
-                  <div className="space-y-2 border-t pt-4 border-inherit">
-                    <label className="text-[11px] font-mono uppercase tracking-wider opacity-60">Accent Palette</label>
-                    <div className="grid grid-cols-3 gap-2">
+                  {/* STEP 4: DECK PALETTE & LAYOUT */}
+                  <div className="space-y-3 border-t pt-4 border-inherit">
+                    <label className="text-[11px] font-mono uppercase tracking-wider opacity-70 flex items-center gap-1.5 font-bold">
+                      <LayoutGrid className="w-3.5 h-3.5 text-emerald-500" /> 4. Layout Mode & Accent Colors
+                    </label>
+
+                    {/* Layout */}
+                    <div className="grid grid-cols-2 gap-2">
+                      <button
+                        onClick={() => changeLayout('studio')}
+                        className={`p-2.5 rounded-xl border text-xs font-semibold flex items-center justify-center gap-1.5 ${
+                          layout === 'studio' ? 'border-emerald-500 bg-emerald-500/10' : 'border-white/10'
+                        }`}
+                      >
+                        <LayoutGrid className="w-3.5 h-3.5" /> Studio (3-Column)
+                      </button>
+                      <button
+                        onClick={() => changeLayout('cinema')}
+                        className={`p-2.5 rounded-xl border text-xs font-semibold flex items-center justify-center gap-1.5 ${
+                          layout === 'cinema' ? 'border-emerald-500 bg-emerald-500/10' : 'border-white/10'
+                        }`}
+                      >
+                        <Maximize2 className="w-3.5 h-3.5" /> Cinema Focus
+                      </button>
+                    </div>
+
+                    {/* Color Swatches */}
+                    <div className="grid grid-cols-3 gap-2 pt-1">
                       <button
                         onClick={() => changeColorTheme('dark')}
                         className={`p-2 rounded-xl border flex items-center gap-2 text-xs font-semibold ${
@@ -1825,7 +1847,7 @@ export default function HomePage() {
                 onClick={() => setShowAtmosphereModal(false)}
                 className={`px-5 py-2 text-xs font-bold rounded-xl shadow-md ${theme.accentBtn}`}
               >
-                Apply Atmosphere
+                Apply & Close
               </button>
             </div>
           </div>
