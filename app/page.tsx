@@ -122,7 +122,7 @@ const VIBE_PRESETS = [
   {
     id: 'alpine-pack',
     name: 'Alpine Blizzard',
-    desc: 'Pristine snow-capped mountain valley with drifting snow & silver accents',
+    desc: 'Pristine snow-capped mountain valley with realistic drifting snow & silver accents',
     url: GALLERY_WALLPAPERS[1].url,
     effect: 'snow' as WeatherEffect,
     color: 'oled' as ColorPreset,
@@ -174,21 +174,19 @@ const VIBE_PRESETS = [
 export default function HomePage() {
   const [layout, setLayout] = useState<LayoutPreset>('studio');
   const [colorTheme, setColorTheme] = useState<ColorPreset>('dark');
-
-  // Atmosphere Modal Mode: 'presets' (1-Click) vs 'custom_builder' (Create from Scratch)
   const [atmoMode, setAtmoMode] = useState<AtmosphereMode>('presets');
 
   // Custom Deck Builder States
   const [bgMode, setBgMode] = useState<BgMode>('gallery');
-  const [selectedGalleryUrl, setSelectedGalleryUrl] = useState(GALLERY_WALLPAPERS[0].url);
+  const [selectedGalleryUrl, setSelectedGalleryUrl] = useState(GALLERY_WALLPAPERS[1].url);
   const [bgCustomUrl, setBgCustomUrl] = useState('');
   const [bgBlur, setBgBlur] = useState<number>(8);
-  const [bgDim, setBgDim] = useState<number>(50);
+  const [bgDim, setBgDim] = useState<number>(45);
   const [bgPosY, setBgPosY] = useState<number>(50);
   const [bgScale, setBgScale] = useState<number>(105);
 
   // Weather FX State & Sliders
-  const [weatherFx, setWeatherFx] = useState<WeatherEffect>('thunderstorm');
+  const [weatherFx, setWeatherFx] = useState<WeatherEffect>('snow');
   const [fxDensity, setFxDensity] = useState<number>(50);
   const [fxSpeed, setFxSpeed] = useState<number>(50);
 
@@ -251,13 +249,13 @@ export default function HomePage() {
     const savedBgMode = (localStorage.getItem('trackdeck_bg_mode') as BgMode) || 'gallery';
     setBgMode(savedBgMode);
 
-    const savedGalleryUrl = localStorage.getItem('trackdeck_bg_gallery') || GALLERY_WALLPAPERS[0].url;
+    const savedGalleryUrl = localStorage.getItem('trackdeck_bg_gallery') || GALLERY_WALLPAPERS[1].url;
     setSelectedGalleryUrl(savedGalleryUrl);
 
     const savedBgCustom = localStorage.getItem('trackdeck_bg_custom') || '';
     setBgCustomUrl(savedBgCustom);
 
-    const savedFx = (localStorage.getItem('trackdeck_weather_fx') as WeatherEffect) || 'thunderstorm';
+    const savedFx = (localStorage.getItem('trackdeck_weather_fx') as WeatherEffect) || 'snow';
     setWeatherFx(savedFx);
 
     const savedDensity = Number(localStorage.getItem('trackdeck_fx_density') ?? 50);
@@ -269,7 +267,7 @@ export default function HomePage() {
     const savedBlur = Number(localStorage.getItem('trackdeck_bg_blur') ?? 8);
     setBgBlur(savedBlur);
 
-    const savedDim = Number(localStorage.getItem('trackdeck_bg_dim') ?? 50);
+    const savedDim = Number(localStorage.getItem('trackdeck_bg_dim') ?? 45);
     setBgDim(savedDim);
 
     const savedPosY = Number(localStorage.getItem('trackdeck_bg_pos_y') ?? 50);
@@ -310,7 +308,6 @@ export default function HomePage() {
     });
   }, []);
 
-  // 1-Click Preset Handler
   function applyVibePreset(preset: typeof VIBE_PRESETS[0]) {
     setBgMode('gallery');
     setSelectedGalleryUrl(preset.url);
@@ -346,7 +343,6 @@ export default function HomePage() {
     localStorage.setItem(key, String(val));
   }
 
-  // Local Image Upload with Canvas Auto-Compression
   function handleImageUpload(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -385,7 +381,7 @@ export default function HomePage() {
   }
 
   // ========================================================
-  // REAL-TIME CANVAS WEATHER ENGINE (SMOOTH, ZERO MOIRÉ)
+  // HYPER-REALISTIC CANVAS WEATHER SIMULATION
   // ========================================================
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -405,10 +401,73 @@ export default function HomePage() {
     };
     window.addEventListener('resize', handleResize);
 
-    const count = Math.floor(120 * (fxDensity / 50));
+    const densityMult = fxDensity / 50;
     const speedMult = fxSpeed / 50;
 
-    interface Particle {
+    // ----------------------------------------------------
+    // REALISTIC MULTI-LAYER SNOW PARTICLE SYSTEM
+    // ----------------------------------------------------
+    interface Snowflake {
+      x: number;
+      y: number;
+      radius: number;
+      speedY: number;
+      swing: number;
+      angle: number;
+      angularSpeed: number;
+      alpha: number;
+      layer: 'far' | 'mid' | 'bokeh';
+    }
+
+    const snowFlakes: Snowflake[] = [];
+    const totalFlakes = Math.floor(180 * densityMult);
+
+    for (let i = 0; i < totalFlakes; i++) {
+      const rand = Math.random();
+      if (rand < 0.65) {
+        // Deep background micro-dust (65%)
+        snowFlakes.push({
+          x: Math.random() * width,
+          y: Math.random() * height,
+          radius: Math.random() * 0.7 + 0.35, // 0.35px to 1.05px
+          speedY: (Math.random() * 0.6 + 0.4) * speedMult,
+          swing: Math.random() * 0.5 + 0.2,
+          angle: Math.random() * Math.PI * 2,
+          angularSpeed: (Math.random() * 0.015 + 0.005) * (Math.random() < 0.5 ? 1 : -1),
+          alpha: Math.random() * 0.3 + 0.15,
+          layer: 'far',
+        });
+      } else if (rand < 0.90) {
+        // Midground natural flakes (25%)
+        snowFlakes.push({
+          x: Math.random() * width,
+          y: Math.random() * height,
+          radius: Math.random() * 1.0 + 1.1, // 1.1px to 2.1px
+          speedY: (Math.random() * 1.0 + 0.8) * speedMult,
+          swing: Math.random() * 1.1 + 0.5,
+          angle: Math.random() * Math.PI * 2,
+          angularSpeed: (Math.random() * 0.02 + 0.01) * (Math.random() < 0.5 ? 1 : -1),
+          alpha: Math.random() * 0.4 + 0.4,
+          layer: 'mid',
+        });
+      } else {
+        // Foreground soft bokeh lens circles (10%)
+        snowFlakes.push({
+          x: Math.random() * width,
+          y: Math.random() * height,
+          radius: Math.random() * 1.6 + 2.4, // 2.4px to 4.0px
+          speedY: (Math.random() * 1.6 + 1.2) * speedMult,
+          swing: Math.random() * 1.8 + 0.8,
+          angle: Math.random() * Math.PI * 2,
+          angularSpeed: (Math.random() * 0.025 + 0.01) * (Math.random() < 0.5 ? 1 : -1),
+          alpha: Math.random() * 0.22 + 0.15,
+          layer: 'bokeh',
+        });
+      }
+    }
+
+    // Rain / Storm / Ember Particles
+    interface GeneralParticle {
       x: number;
       y: number;
       l: number;
@@ -418,12 +477,13 @@ export default function HomePage() {
       opacity: number;
     }
 
-    const particles: Particle[] = [];
+    const generalParticles: GeneralParticle[] = [];
+    const count = Math.floor(100 * densityMult);
     for (let i = 0; i < count; i++) {
-      particles.push({
+      generalParticles.push({
         x: Math.random() * width,
         y: Math.random() * height,
-        l: Math.random() * 22 + 10,
+        l: Math.random() * 20 + 10,
         xs: -1.5 + Math.random() * 0.4,
         ys: (Math.random() * 10 + 12) * speedMult,
         size: Math.random() * 2 + 1,
@@ -433,11 +493,54 @@ export default function HomePage() {
 
     let lightningOpacity = 0;
     let nextLightning = Date.now() + Math.random() * 6000 + 4000;
+    let timeTick = 0;
 
     const render = () => {
       ctx.clearRect(0, 0, width, height);
+      timeTick += 0.01;
 
-      // LIGHTNING FLASH: Smooth atmospheric illumination (No lines!)
+      // 1. REALISTIC SNOW SIMULATION
+      if (weatherFx === 'snow') {
+        // Subtle shifting ambient breeze
+        const wind = Math.sin(timeTick * 0.3) * 0.4 + 0.15;
+
+        for (const f of snowFlakes) {
+          f.angle += f.angularSpeed;
+          // Organic vertical fall velocity modulated by air resistance
+          f.y += f.speedY * (1 + Math.sin(f.angle) * 0.15);
+          // Realistic horizontal tumble & drift
+          f.x += Math.sin(f.angle) * f.swing + wind * (f.radius / 1.5);
+
+          // Render based on depth layer
+          if (f.layer === 'bokeh') {
+            // Soft feathered camera lens blur
+            const grad = ctx.createRadialGradient(f.x, f.y, 0, f.x, f.y, f.radius);
+            grad.addColorStop(0, `rgba(245, 250, 255, ${f.alpha})`);
+            grad.addColorStop(0.55, `rgba(240, 248, 255, ${f.alpha * 0.5})`);
+            grad.addColorStop(1, 'rgba(240, 248, 255, 0)');
+            ctx.fillStyle = grad;
+            ctx.beginPath();
+            ctx.arc(f.x, f.y, f.radius, 0, Math.PI * 2);
+            ctx.fill();
+          } else {
+            // Crisp, delicate winter white specks
+            ctx.fillStyle = `rgba(242, 247, 255, ${f.alpha})`;
+            ctx.beginPath();
+            ctx.arc(f.x, f.y, f.radius, 0, Math.PI * 2);
+            ctx.fill();
+          }
+
+          // Screen Wrap
+          if (f.y > height + 10) {
+            f.y = -10;
+            f.x = Math.random() * (width + 40) - 20;
+          }
+          if (f.x > width + 20) f.x = -20;
+          if (f.x < -20) f.x = width + 20;
+        }
+      }
+
+      // 2. THUNDERSTORM / LIGHTNING FLASH (Smooth, no stripes)
       if (weatherFx === 'thunderstorm') {
         const now = Date.now();
         if (now > nextLightning) {
@@ -452,19 +555,19 @@ export default function HomePage() {
         }
       }
 
-      // RAIN: Delicate, realistic streaks
+      // 3. RAIN STREAKS
       if (weatherFx === 'rain' || weatherFx === 'thunderstorm') {
         ctx.strokeStyle = 'rgba(255, 255, 255, 0.4)';
         ctx.lineWidth = 1.1;
         ctx.lineCap = 'round';
         ctx.beginPath();
-        for (const p of particles) {
+        for (const p of generalParticles) {
           ctx.moveTo(p.x, p.y);
           ctx.lineTo(p.x + p.xs * 1.8, p.y + p.l);
         }
         ctx.stroke();
 
-        for (const p of particles) {
+        for (const p of generalParticles) {
           p.x += p.xs;
           p.y += p.ys;
           if (p.y > height) {
@@ -474,9 +577,9 @@ export default function HomePage() {
         }
       }
 
-      // EMBERS: Floating glowing sparks
+      // 4. EMBERS
       if (weatherFx === 'embers') {
-        for (const p of particles) {
+        for (const p of generalParticles) {
           ctx.beginPath();
           ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
           ctx.fillStyle = `rgba(255, ${Math.floor(Math.random() * 120 + 80)}, 0, ${p.opacity})`;
@@ -493,24 +596,6 @@ export default function HomePage() {
         }
       }
 
-      // SNOW: Soft drifting circles
-      if (weatherFx === 'snow') {
-        ctx.fillStyle = 'rgba(255, 255, 255, 0.65)';
-        ctx.shadowBlur = 0;
-        for (const p of particles) {
-          ctx.beginPath();
-          ctx.arc(p.x, p.y, p.size * 1.2, 0, Math.PI * 2);
-          ctx.fill();
-
-          p.y += p.ys * 0.22;
-          p.x += Math.sin(p.y * 0.01) * 0.5;
-          if (p.y > height) {
-            p.y = -5;
-            p.x = Math.random() * width;
-          }
-        }
-      }
-
       animId = requestAnimationFrame(render);
     };
 
@@ -522,7 +607,7 @@ export default function HomePage() {
     };
   }, [weatherFx, fxDensity, fxSpeed]);
 
-  // Polling & Queue
+  // Polling
   useEffect(() => {
     if (!isAuthenticated) return;
     const interval = setInterval(fetchNowPlaying, 1500);
@@ -1000,7 +1085,6 @@ export default function HomePage() {
 
   const theme = themeClasses[colorTheme];
 
-  // Active Background Image Resolver
   const activeBgImage =
     bgMode === 'custom' && bgCustomUrl
       ? bgCustomUrl
@@ -1013,7 +1097,7 @@ export default function HomePage() {
       className={`h-screen w-screen overflow-hidden flex flex-col font-sans select-none transition-colors duration-500 ${theme.root}`}
     >
       {/* ======================================================== */}
-      {/* 0. REAL-TIME BACKGROUND & SMOOTH WEATHER CANVAS          */}
+      {/* 0. DYNAMIC BACKGROUND & REAL-TIME WEATHER CANVAS         */}
       {/* ======================================================== */}
       {activeBgImage && (
         <div className="fixed inset-0 pointer-events-none z-0 overflow-hidden">
@@ -1039,10 +1123,10 @@ export default function HomePage() {
             }}
           />
 
-          {/* THE CLEAN 2D CANVAS SHADER (ZERO MOIRÉ LINES) */}
+          {/* REALISTIC 2D CANVAS SHADER (ZERO MOIRÉ LINES) */}
           <canvas ref={canvasRef} className="absolute inset-0 pointer-events-none" />
 
-          {/* CRT Scanline Overlay */}
+          {/* Subtle CRT Scanline Overlay */}
           {weatherFx === 'scanlines' && (
             <div
               className="absolute inset-0 pointer-events-none opacity-20"
@@ -1445,7 +1529,7 @@ export default function HomePage() {
               </button>
             </div>
 
-            {/* TOP-LEVEL MODE TOGGLE: [ 1-CLICK PRESETS ] vs [ BUILD YOUR OWN FROM SCRATCH ] */}
+            {/* TOP-LEVEL MODE TOGGLE */}
             <div className="grid grid-cols-2 gap-2 bg-black/25 p-1 rounded-2xl border border-inherit shrink-0">
               <button
                 onClick={() => setAtmoMode('presets')}
@@ -1467,9 +1551,7 @@ export default function HomePage() {
 
             {/* CONTENT AREA */}
             <div className="flex-1 overflow-y-auto pr-1 space-y-4">
-              {/* ==================================================== */}
-              {/* MODE 1: 1-CLICK VIBE PRESETS (SEPARATE & SIMPLE)    */}
-              {/* ==================================================== */}
+              {/* MODE 1: 1-CLICK VIBE PRESETS */}
               {atmoMode === 'presets' ? (
                 <div className="space-y-2.5">
                   <p className="text-xs opacity-60">Curated, complete aesthetics. One click sets image, live weather shaders, and matching colors.</p>
@@ -1499,9 +1581,7 @@ export default function HomePage() {
                   </div>
                 </div>
               ) : (
-                /* ==================================================== */
-                /* MODE 2: CUSTOM DECK BUILDER (BUILD FROM ZERO)       */
-                /* ==================================================== */
+                /* MODE 2: CUSTOM DECK BUILDER (BUILD FROM ZERO) */
                 <div className="space-y-5">
                   {/* STEP 1: WALLPAPER SOURCE */}
                   <div className="space-y-2.5">
@@ -1706,7 +1786,7 @@ export default function HomePage() {
                         onClick={() => changeWeatherFx('snow')}
                         className={`p-2 rounded-xl border text-xs font-semibold flex items-center justify-center gap-1 ${weatherFx === 'snow' ? 'border-sky-300 bg-sky-300/10 text-sky-200' : 'border-white/10'}`}
                       >
-                        <Snowflake className="w-3.5 h-3.5" /> Snow
+                        <Snowflake className="w-3.5 h-3.5" /> Realistic Snow
                       </button>
                       <button
                         onClick={() => changeWeatherFx('scanlines')}
@@ -1720,7 +1800,7 @@ export default function HomePage() {
                       <div className="space-y-3 pt-2">
                         <div className="space-y-1">
                           <div className="flex justify-between text-xs">
-                            <span>Particle Density</span>
+                            <span>Particle Density / Intensity</span>
                             <span className="font-mono opacity-60">{fxDensity}%</span>
                           </div>
                           <input
@@ -1739,7 +1819,7 @@ export default function HomePage() {
 
                         <div className="space-y-1">
                           <div className="flex justify-between text-xs">
-                            <span>Fall Speed</span>
+                            <span>Drift & Fall Speed</span>
                             <span className="font-mono opacity-60">{fxSpeed}%</span>
                           </div>
                           <input
@@ -1847,7 +1927,7 @@ export default function HomePage() {
                 onClick={() => setShowAtmosphereModal(false)}
                 className={`px-5 py-2 text-xs font-bold rounded-xl shadow-md ${theme.accentBtn}`}
               >
-                Apply & Close
+                Apply Atmosphere
               </button>
             </div>
           </div>
