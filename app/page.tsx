@@ -13,8 +13,6 @@ import {
   ArrowLeft,
   Settings,
   User,
-  Sun,
-  Moon,
   RefreshCw,
   X,
   Send,
@@ -23,6 +21,14 @@ import {
   Laptop,
   Speaker,
   Radio,
+  Palette,
+  Maximize2,
+  LayoutGrid,
+  Minimize2,
+  Flame,
+  Waves,
+  Sun,
+  Moon,
 } from 'lucide-react';
 import { getAccessToken, spotifyFetch, redirectToSpotifyAuth, SpotifyAPI } from '@/lib/spotify';
 import { askGemini, ChatMessage, CopilotResponse } from '@/lib/gemini';
@@ -49,16 +55,21 @@ interface SpotifyDevice {
   name: string;
   type: string;
   is_active: boolean;
-  volume_percent?: number;
 }
 
+type LayoutPreset = 'studio' | 'cinema' | 'mini';
+type ColorPreset = 'dark' | 'light' | 'neon' | 'aqua' | 'amber' | 'oled';
+
 export default function HomePage() {
-  const [theme, setTheme] = useState<'dark' | 'light'>('dark');
+  const [layout, setLayout] = useState<LayoutPreset>('studio');
+  const [colorTheme, setColorTheme] = useState<ColorPreset>('dark');
+
   const [isAuthenticated, setIsAuthenticated] = useState<boolean | null>(null);
   const [spotifyClientId, setSpotifyClientId] = useState('');
   const [showSpotifyModal, setShowSpotifyModal] = useState(false);
   const [showSettingsModal, setShowSettingsModal] = useState(false);
   const [showDevicesModal, setShowDevicesModal] = useState(false);
+  const [showAtmosphereModal, setShowAtmosphereModal] = useState(false);
 
   // Key
   const [geminiKey, setGeminiKey] = useState<string>('');
@@ -77,12 +88,11 @@ export default function HomePage() {
     lastSyncTime: number;
   } | null>(null);
 
-  // Devices (Spotify Connect)
-  const [devices, setDevices] = useState<SpotifyDevice[]>([]);
   const activeDeviceId = useRef<string | null>(null);
   const isActionPending = useRef(false);
 
-  // Playlists & Queue
+  // Devices & Collections
+  const [devices, setDevices] = useState<SpotifyDevice[]>([]);
   const [playlists, setPlaylists] = useState<Playlist[]>([]);
   const [selectedPlaylist, setSelectedPlaylist] = useState<Playlist | null>(null);
   const [playlistTracks, setPlaylistTracks] = useState<TrackItem[]>([]);
@@ -100,9 +110,13 @@ export default function HomePage() {
   const [isAiLoading, setIsAiLoading] = useState(false);
   const chatBottomRef = useRef<HTMLDivElement>(null);
 
+  // Initial Load
   useEffect(() => {
-    const savedTheme = (localStorage.getItem('trackdeck_theme') as 'dark' | 'light') || 'dark';
-    setTheme(savedTheme);
+    const savedLayout = (localStorage.getItem('trackdeck_layout') as LayoutPreset) || 'studio';
+    setLayout(savedLayout);
+
+    const savedColor = (localStorage.getItem('trackdeck_color_theme') as ColorPreset) || 'dark';
+    setColorTheme(savedColor);
 
     const savedKey = localStorage.getItem('gemini_api_key') || '';
     setGeminiKey(savedKey);
@@ -136,9 +150,14 @@ export default function HomePage() {
     });
   }, []);
 
-  function toggleTheme(newTheme: 'dark' | 'light') {
-    setTheme(newTheme);
-    localStorage.setItem('trackdeck_theme', newTheme);
+  function changeLayout(newLayout: LayoutPreset) {
+    setLayout(newLayout);
+    localStorage.setItem('trackdeck_layout', newLayout);
+  }
+
+  function changeColorTheme(newTheme: ColorPreset) {
+    setColorTheme(newTheme);
+    localStorage.setItem('trackdeck_color_theme', newTheme);
   }
 
   // Polling
@@ -154,7 +173,7 @@ export default function HomePage() {
     return () => clearInterval(interval);
   }, [isAuthenticated]);
 
-  // Scrub Bar Ticking
+  // Scrub Ticking
   useEffect(() => {
     if (!playback?.isPlaying) return;
     const timer = setInterval(() => {
@@ -190,7 +209,7 @@ export default function HomePage() {
     }
   }
 
-  // Switch or Wake Up Device
+  // Transfer Playback
   async function handleTransferDevice(devId: string) {
     try {
       isActionPending.current = true;
@@ -307,9 +326,7 @@ export default function HomePage() {
     }
   }
 
-  // ==========================================================
-  // COPILOT COMMAND EXECUTION (CLEAN, NO WEIRD "PLAY" SEARCHES)
-  // ==========================================================
+  // Copilot Direct Executor
   async function executeCopilotCommand(copilot: CopilotResponse) {
     const { command, query } = copilot;
     if (!command) return;
@@ -320,13 +337,11 @@ export default function HomePage() {
 
     try {
       if (command === 'play') {
-        // Guard against AI searching for words like "play", "music", "song"
         const isGeneric =
           !query ||
           /^(play|music|song|the song|it|unpause|resume|track)$/i.test(query.trim());
 
         if (!isGeneric && query) {
-          // Real search query
           const searchRes = await spotifyFetch(
             `/search?q=${encodeURIComponent(query)}&type=track&limit=5`
           );
@@ -336,7 +351,6 @@ export default function HomePage() {
             await SpotifyAPI.playUri(undefined, [track.uri], deviceId);
           }
         } else {
-          // Just resume playback!
           await spotifyFetch(`/me/player/play${devParam}`, { method: 'PUT' });
         }
       }
@@ -375,7 +389,7 @@ export default function HomePage() {
     }
   }
 
-  // Media Controls
+  // Media Handlers
   async function togglePlay() {
     if (!playback) return;
     const targetState = !playback.isPlaying;
@@ -485,7 +499,7 @@ export default function HomePage() {
     ]);
   }
 
-  // AI Chat Handler
+  // AI Chat Sender
   async function sendToGemini(textToSend: string) {
     if (!textToSend.trim() || isAiLoading) return;
     if (!geminiKey) {
@@ -498,19 +512,12 @@ export default function HomePage() {
 
     try {
       const response = await askGemini(textToSend, messages, geminiKey, playback);
-
-      // Execute action directly
       if (response.command) {
         executeCopilotCommand(response);
       }
-
-      // Display clean message without any green error badge
       setMessages((prev) => [
         ...prev,
-        {
-          role: 'model',
-          text: response.message,
-        },
+        { role: 'model', text: response.message },
       ]);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Error reaching Copilot';
@@ -542,19 +549,106 @@ export default function HomePage() {
     ? Math.min(100, Math.max(0, (playback.progressMs / playback.durationMs) * 100))
     : 0;
 
-  const isDark = theme === 'dark';
+  // --- THEME COLOR ENGINE ---
+  const themeClasses: Record<
+    ColorPreset,
+    {
+      root: string;
+      topBar: string;
+      panel: string;
+      border: string;
+      accentBtn: string;
+      accentText: string;
+      scrubBg: string;
+      scrubFill: string;
+      modal: string;
+      input: string;
+    }
+  > = {
+    dark: {
+      root: 'bg-[#07080b] text-zinc-100',
+      topBar: 'bg-[#040507]/90 border-white/[0.05] text-white',
+      panel: 'bg-black/40 text-zinc-100 border-white/[0.05]',
+      border: 'border-white/[0.05]',
+      accentBtn: 'bg-emerald-500 hover:bg-emerald-400 text-black shadow-emerald-500/20',
+      accentText: 'text-emerald-500',
+      scrubBg: 'bg-white/[0.08] hover:bg-white/[0.14]',
+      scrubFill: 'bg-emerald-500',
+      modal: 'bg-[#0e1017] border-white/10 text-white',
+      input: 'bg-white/[0.03] border-white/10 text-white placeholder:text-zinc-500 focus:border-emerald-500/60',
+    },
+    light: {
+      root: 'bg-[#f4f5f8] text-zinc-900',
+      topBar: 'bg-white/80 border-zinc-200/80 text-zinc-900 shadow-sm',
+      panel: 'bg-white/70 text-zinc-900 border-zinc-200/80 shadow-sm',
+      border: 'border-zinc-200/80',
+      accentBtn: 'bg-emerald-500 hover:bg-emerald-400 text-black shadow-emerald-500/10',
+      accentText: 'text-emerald-600',
+      scrubBg: 'bg-zinc-200 hover:bg-zinc-300',
+      scrubFill: 'bg-emerald-500',
+      modal: 'bg-white border-zinc-200 text-zinc-900',
+      input: 'bg-zinc-50 border-zinc-200 text-zinc-900 placeholder:text-zinc-400 focus:border-emerald-500',
+    },
+    neon: {
+      root: 'bg-[#0a0518] text-pink-50',
+      topBar: 'bg-[#070212]/90 border-pink-500/20 text-white',
+      panel: 'bg-[#120826]/60 text-pink-50 border-pink-500/20 shadow-pink-950/20',
+      border: 'border-pink-500/20',
+      accentBtn: 'bg-gradient-to-r from-pink-500 to-rose-500 hover:from-pink-400 hover:to-rose-400 text-white shadow-pink-500/30',
+      accentText: 'text-cyan-400',
+      scrubBg: 'bg-pink-950/40 hover:bg-pink-900/50',
+      scrubFill: 'bg-gradient-to-r from-cyan-400 to-pink-500',
+      modal: 'bg-[#120826] border-pink-500/30 text-white',
+      input: 'bg-pink-950/20 border-pink-500/30 text-white placeholder:text-pink-400/50 focus:border-cyan-400',
+    },
+    aqua: {
+      root: 'bg-[#040d1a] text-cyan-50',
+      topBar: 'bg-[#02070e]/90 border-cyan-500/20 text-white',
+      panel: 'bg-[#081b33]/60 text-cyan-50 border-cyan-500/20 shadow-cyan-950/20',
+      border: 'border-cyan-500/20',
+      accentBtn: 'bg-gradient-to-r from-cyan-400 to-teal-400 hover:from-cyan-300 hover:to-teal-300 text-black shadow-cyan-500/30',
+      accentText: 'text-cyan-400',
+      scrubBg: 'bg-cyan-950/40 hover:bg-cyan-900/50',
+      scrubFill: 'bg-gradient-to-r from-cyan-400 to-teal-300',
+      modal: 'bg-[#081b33] border-cyan-500/30 text-white',
+      input: 'bg-cyan-950/20 border-cyan-500/30 text-white placeholder:text-cyan-400/50 focus:border-teal-400',
+    },
+    amber: {
+      root: 'bg-[#100a06] text-amber-50',
+      topBar: 'bg-[#090503]/90 border-amber-500/20 text-white',
+      panel: 'bg-[#1a0f07]/60 text-amber-50 border-amber-500/20 shadow-amber-950/20',
+      border: 'border-amber-500/20',
+      accentBtn: 'bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 text-black shadow-amber-500/30',
+      accentText: 'text-amber-400',
+      scrubBg: 'bg-amber-950/40 hover:bg-amber-900/50',
+      scrubFill: 'bg-gradient-to-r from-amber-400 to-orange-400',
+      modal: 'bg-[#1a0f07] border-amber-500/30 text-white',
+      input: 'bg-amber-950/20 border-amber-500/30 text-white placeholder:text-amber-400/50 focus:border-amber-400',
+    },
+    oled: {
+      root: 'bg-[#000000] text-white',
+      topBar: 'bg-[#000000] border-zinc-800 text-white',
+      panel: 'bg-[#000000] text-white border-zinc-850',
+      border: 'border-zinc-850',
+      accentBtn: 'bg-white hover:bg-zinc-200 text-black shadow-white/10',
+      accentText: 'text-zinc-400',
+      scrubBg: 'bg-zinc-900 hover:bg-zinc-800',
+      scrubFill: 'bg-white',
+      modal: 'bg-[#000000] border-zinc-800 text-white',
+      input: 'bg-zinc-950 border-zinc-800 text-white placeholder:text-zinc-600 focus:border-white',
+    },
+  };
+
+  const theme = themeClasses[colorTheme];
 
   return (
     <div
-      className={`h-screen w-screen overflow-hidden flex flex-col font-sans select-none transition-colors duration-300 ${
-        isDark ? 'bg-[#07080b] text-zinc-100' : 'bg-[#f4f5f8] text-zinc-900'
-      }`}
+      className={`h-screen w-screen overflow-hidden flex flex-col font-sans select-none transition-colors duration-500 ${theme.root}`}
     >
+      {/* Ambient Glow */}
       {playback?.albumArt && (
         <div
-          className={`fixed inset-0 pointer-events-none transition-all duration-1000 scale-125 z-0 ${
-            isDark ? 'opacity-25 blur-[160px]' : 'opacity-15 blur-[140px]'
-          }`}
+          className="fixed inset-0 pointer-events-none transition-all duration-1000 scale-125 z-0 opacity-20 blur-[160px]"
           style={{
             backgroundImage: `url(${playback.albumArt})`,
             backgroundPosition: 'center',
@@ -563,13 +657,11 @@ export default function HomePage() {
         />
       )}
 
-      {/* TOP BAR */}
+      {/* ======================================================== */}
+      {/* 1. TOP NAVBAR                                            */}
+      {/* ======================================================== */}
       <header
-        className={`relative z-30 h-12 border-b px-5 flex items-center justify-between shrink-0 backdrop-blur-2xl transition-colors duration-300 ${
-          isDark
-            ? 'border-white/[0.05] bg-[#040507]/90 text-white'
-            : 'border-zinc-200/80 bg-white/80 text-zinc-900'
-        }`}
+        className={`relative z-30 h-12 border-b px-5 flex items-center justify-between shrink-0 backdrop-blur-2xl transition-colors duration-300 ${theme.topBar}`}
       >
         <div className="flex items-center gap-2">
           {/* AI Status */}
@@ -577,29 +669,21 @@ export default function HomePage() {
             onClick={() => setShowSettingsModal(true)}
             className={`text-[11px] font-medium px-3 py-1 rounded-full border transition-all flex items-center gap-1.5 ${
               geminiKey
-                ? isDark
-                  ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300 hover:bg-emerald-500/20'
-                  : 'bg-emerald-50 border-emerald-300 text-emerald-700 hover:bg-emerald-100'
-                : isDark
-                ? 'bg-white/[0.04] border-white/10 text-zinc-400 hover:text-zinc-200'
-                : 'bg-zinc-100 border-zinc-200 text-zinc-600 hover:text-zinc-900'
+                ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400'
+                : 'bg-white/[0.04] border-white/10 text-zinc-400 hover:text-white'
             }`}
           >
-            <Sparkles className={`w-3 h-3 ${geminiKey ? 'text-emerald-500' : 'text-zinc-400'}`} />
+            <Sparkles className="w-3 h-3 text-emerald-500" />
             <span>{geminiKey ? 'Copilot Active' : 'Connect AI'}</span>
           </button>
 
-          {/* SPOTIFY CONNECT DEVICE SWITCHER PILL */}
+          {/* Device Selector Pill */}
           <button
             onClick={() => {
               loadDevices();
               setShowDevicesModal(true);
             }}
-            className={`text-[11px] font-medium px-3 py-1 rounded-full border transition-all flex items-center gap-1.5 ${
-              isDark
-                ? 'bg-white/[0.04] border-white/10 text-zinc-300 hover:bg-white/[0.08] hover:text-white'
-                : 'bg-zinc-100 border-zinc-200 text-zinc-700 hover:bg-zinc-200'
-            }`}
+            className="text-[11px] font-medium px-3 py-1 rounded-full border border-white/10 bg-white/[0.03] hover:bg-white/[0.08] transition-colors flex items-center gap-1.5"
             title="Switch or Wake Device"
           >
             <Smartphone className="w-3 h-3 text-emerald-500" />
@@ -609,182 +693,175 @@ export default function HomePage() {
           </button>
         </div>
 
+        {/* Center: Brand */}
         <div className="flex items-center gap-2">
           <Disc3 className="w-4 h-4 text-emerald-500 animate-[spin_10s_linear_infinite]" />
           <h1 className="font-bold text-xs tracking-widest uppercase font-mono">TrackDeck</h1>
         </div>
 
-        <div className="flex items-center gap-1">
+        {/* Right Actions */}
+        <div className="flex items-center gap-1.5">
+          {/* Atmosphere Palette Button */}
           <button
-            onClick={() => setShowSettingsModal(true)}
-            title="Settings & Appearance"
-            className={`p-1.5 rounded-lg transition-colors ${
-              isDark ? 'text-zinc-400 hover:text-white hover:bg-white/[0.06]' : 'text-zinc-600 hover:text-black hover:bg-zinc-200/60'
-            }`}
+            onClick={() => setShowAtmosphereModal(true)}
+            title="Atmosphere & Layout Themes"
+            className="p-1.5 rounded-lg hover:bg-white/10 transition-colors flex items-center gap-1 text-xs"
           >
-            <Settings className="w-4 h-4" />
+            <Palette className="w-4 h-4 text-emerald-500" />
           </button>
 
+          {/* Settings Gear */}
+          <button
+            onClick={() => setShowSettingsModal(true)}
+            title="Settings"
+            className="p-1.5 rounded-lg hover:bg-white/10 transition-colors"
+          >
+            <Settings className="w-4 h-4 opacity-70 hover:opacity-100" />
+          </button>
+
+          {/* Account Logout */}
           {isAuthenticated && (
             <button
               onClick={handleLogout}
-              title="Spotify Account (Logout)"
-              className={`p-1.5 rounded-lg transition-colors ${
-                isDark ? 'text-zinc-400 hover:text-rose-400 hover:bg-white/[0.06]' : 'text-zinc-600 hover:text-rose-600 hover:bg-zinc-200/60'
-              }`}
+              title="Spotify Account"
+              className="p-1.5 rounded-lg hover:bg-white/10 hover:text-rose-400 transition-colors"
             >
-              <User className="w-4 h-4" />
+              <User className="w-4 h-4 opacity-70 hover:opacity-100" />
             </button>
           )}
         </div>
       </header>
 
-      {/* THREE-COLUMN WORKSPACE */}
+      {/* ======================================================== */}
+      {/* 2. DYNAMIC WORKSPACE (STUDIO vs CINEMA vs MINI-PLAYER)   */}
+      {/* ======================================================== */}
       <div className="relative z-10 flex-1 flex overflow-hidden">
         
-        {/* LEFT WING: PLAYLISTS */}
-        <aside
-          className={`h-full w-64 border-r backdrop-blur-2xl flex flex-col shrink-0 overflow-hidden transition-colors duration-300 ${
-            isDark
-              ? 'border-white/[0.05] bg-black/40 text-zinc-100'
-              : 'border-zinc-200/80 bg-white/70 text-zinc-900 shadow-sm'
-          }`}
-        >
-          <div
-            className={`p-3.5 border-b flex items-center justify-between min-h-[44px] ${
-              isDark ? 'border-white/[0.04]' : 'border-zinc-200/60'
-            }`}
+        {/* LEFT WING: PLAYLISTS (Visible only in 'studio' layout) */}
+        {layout === 'studio' && (
+          <aside
+            className={`h-full w-64 border-r backdrop-blur-2xl flex flex-col shrink-0 overflow-hidden transition-all duration-300 ${theme.panel}`}
           >
-            {selectedPlaylist ? (
-              <button
-                onClick={() => setSelectedPlaylist(null)}
-                className={`text-xs flex items-center gap-1.5 font-medium transition-colors ${
-                  isDark ? 'text-zinc-400 hover:text-white' : 'text-zinc-600 hover:text-black'
-                }`}
-              >
-                <ArrowLeft className="w-3.5 h-3.5" />
-                <span>All Playlists</span>
-              </button>
-            ) : (
-              <h2 className="text-xs font-mono uppercase tracking-wider font-semibold opacity-70">
-                Playlists
-              </h2>
-            )}
-          </div>
+            <div className={`p-3.5 border-b flex items-center justify-between min-h-[44px] ${theme.border}`}>
+              {selectedPlaylist ? (
+                <button
+                  onClick={() => setSelectedPlaylist(null)}
+                  className="text-xs flex items-center gap-1.5 font-medium opacity-70 hover:opacity-100 transition-opacity"
+                >
+                  <ArrowLeft className="w-3.5 h-3.5" />
+                  <span>All Playlists</span>
+                </button>
+              ) : (
+                <h2 className="text-xs font-mono uppercase tracking-wider font-semibold opacity-70">
+                  Playlists
+                </h2>
+              )}
+            </div>
 
-          <div className="flex-1 overflow-y-auto p-2 space-y-1.5 no-scrollbar">
-            {selectedPlaylist ? (
-              <div className="space-y-3">
-                <div className="text-center p-2">
-                  <img
-                    src={selectedPlaylist.images?.[0]?.url || ''}
-                    alt={selectedPlaylist.name || 'Playlist'}
-                    className="w-28 h-28 mx-auto rounded-2xl shadow-lg object-cover mb-2"
-                  />
-                  <h3 className="font-bold text-xs truncate">{selectedPlaylist.name}</h3>
-                  <p className="text-[10px] opacity-60">
-                    {selectedPlaylist.tracks?.total ?? 0} songs
-                  </p>
-                  <button
-                    onClick={() => handlePlayPlaylist(selectedPlaylist.uri)}
-                    className="mt-2 px-3 py-1 bg-emerald-500 hover:bg-emerald-400 text-black text-[11px] font-bold rounded-full transition-transform hover:scale-105 active:scale-95 shadow-md shadow-emerald-500/20"
-                  >
-                    Play Playlist
-                  </button>
-                </div>
+            <div className="flex-1 overflow-y-auto p-2 space-y-1.5 no-scrollbar">
+              {selectedPlaylist ? (
+                <div className="space-y-3">
+                  <div className="text-center p-2">
+                    <img
+                      src={selectedPlaylist.images?.[0]?.url || ''}
+                      alt={selectedPlaylist.name}
+                      className="w-28 h-28 mx-auto rounded-2xl shadow-lg object-cover mb-2"
+                    />
+                    <h3 className="font-bold text-xs truncate">{selectedPlaylist.name}</h3>
+                    <p className="text-[10px] opacity-60">{selectedPlaylist.tracks?.total ?? 0} songs</p>
+                    <button
+                      onClick={() => handlePlayPlaylist(selectedPlaylist.uri)}
+                      className={`mt-2 px-3 py-1 text-[11px] font-bold rounded-full transition-transform hover:scale-105 active:scale-95 shadow-md ${theme.accentBtn}`}
+                    >
+                      Play
+                    </button>
+                  </div>
 
-                <div className={`space-y-0.5 border-t pt-2 ${isDark ? 'border-white/[0.04]' : 'border-zinc-200'}`}>
-                  {isLoadingTracks ? (
-                    <div className="p-4 text-center text-xs opacity-50 animate-pulse">Loading songs...</div>
-                  ) : (
-                    playlistTracks.map((track, idx) => {
-                      const artistLine = Array.isArray(track?.artists)
-                        ? track.artists.map((a) => a?.name).filter(Boolean).join(', ')
-                        : 'Unknown Artist';
-
-                      return (
+                  <div className={`space-y-0.5 border-t pt-2 ${theme.border}`}>
+                    {isLoadingTracks ? (
+                      <div className="p-4 text-center text-xs opacity-50 animate-pulse">Loading songs...</div>
+                    ) : (
+                      playlistTracks.map((track, idx) => (
                         <div
                           key={`${track.id}-${idx}`}
-                          className={`group flex items-center justify-between p-2 rounded-xl transition-colors text-xs ${
-                            isDark ? 'hover:bg-white/[0.06]' : 'hover:bg-zinc-200/60'
-                          }`}
+                          className="group flex items-center justify-between p-2 rounded-xl hover:bg-white/10 transition-colors text-xs"
                         >
                           <div className="truncate flex-1 pr-2">
-                            <p className="font-medium truncate group-hover:text-emerald-500 transition-colors">
+                            <p className={`font-medium truncate transition-colors group-hover:${theme.accentText}`}>
                               {track.name}
                             </p>
-                            <p className="text-[10px] opacity-60 truncate">{artistLine}</p>
+                            <p className="text-[10px] opacity-60 truncate">
+                              {track.artists?.map((a) => a.name).join(', ')}
+                            </p>
                           </div>
                           <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                            <button
-                              onClick={() => handlePlayTrack(track.uri)}
-                              title="Play"
-                              className="p-1 hover:text-emerald-500"
-                            >
+                            <button onClick={() => handlePlayTrack(track.uri)} className="p-1 hover:text-emerald-500">
                               <Play className="w-3 h-3 fill-current" />
                             </button>
-                            <button
-                              onClick={() => handleAddToQueue(track)}
-                              title="Queue"
-                              className="p-1 hover:text-emerald-500"
-                            >
+                            <button onClick={() => handleAddToQueue(track)} className="p-1 hover:text-emerald-500">
                               <ListPlus className="w-3 h-3" />
                             </button>
                           </div>
                         </div>
-                      );
-                    })
-                  )}
-                </div>
-              </div>
-            ) : playlists.length === 0 ? (
-              <div className="p-4 text-center space-y-2">
-                <p className="text-xs opacity-60">Playlists not loaded.</p>
-                <button
-                  onClick={() => redirectToSpotifyAuth(spotifyClientId)}
-                  className="px-3 py-1.5 bg-emerald-500 hover:bg-emerald-400 text-black text-[11px] font-bold rounded-xl transition-all"
-                >
-                  Sync Permissions
-                </button>
-              </div>
-            ) : (
-              playlists.map((pl) => (
-                <div
-                  key={pl.id}
-                  onClick={() => openPlaylistInspector(pl)}
-                  className={`group rounded-xl cursor-pointer transition-all flex items-center gap-3 p-2 ${
-                    isDark ? 'hover:bg-white/[0.06]' : 'hover:bg-zinc-200/60'
-                  }`}
-                >
-                  <img
-                    src={pl.images?.[0]?.url || ''}
-                    alt={pl.name || 'Playlist'}
-                    className="w-10 h-10 rounded-lg object-cover shadow-sm shrink-0"
-                  />
-                  <div className="truncate flex-1">
-                    <p className="text-xs font-semibold truncate group-hover:text-emerald-500 transition-colors">
-                      {pl.name}
-                    </p>
-                    <p className="text-[10px] opacity-60">{pl.tracks?.total ?? 0} songs</p>
+                      ))
+                    )}
                   </div>
                 </div>
-              ))
-            )}
-          </div>
-        </aside>
+              ) : (
+                playlists.map((pl) => (
+                  <div
+                    key={pl.id}
+                    onClick={() => openPlaylistInspector(pl)}
+                    className="group rounded-xl cursor-pointer hover:bg-white/10 transition-all flex items-center gap-3 p-2"
+                  >
+                    <img
+                      src={pl.images?.[0]?.url || ''}
+                      alt={pl.name}
+                      className="w-10 h-10 rounded-lg object-cover shadow-sm shrink-0"
+                    />
+                    <div className="truncate flex-1">
+                      <p className={`text-xs font-semibold truncate transition-colors group-hover:${theme.accentText}`}>
+                        {pl.name}
+                      </p>
+                      <p className="text-[10px] opacity-60">{pl.tracks?.total ?? 0} songs</p>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          </aside>
+        )}
 
-        {/* CENTER STAGE */}
-        <main className="flex-1 flex flex-col justify-between overflow-hidden px-6 py-4">
+        {/* CENTER STAGE: ADAPTS TO 'STUDIO', 'CINEMA', AND 'MINI' */}
+        <main
+          className={`flex-1 flex flex-col justify-between overflow-hidden transition-all duration-500 ${
+            layout === 'cinema'
+              ? 'px-8 py-6 max-w-4xl mx-auto'
+              : layout === 'mini'
+              ? 'p-3 max-w-sm mx-auto'
+              : 'px-6 py-4'
+          }`}
+        >
+          {/* UPPER DECK: VINYL SHOWCASE */}
           <div className="flex-1 flex flex-col items-center justify-center min-h-0">
-            <div className="w-full max-w-md flex flex-col items-center text-center">
-              
-              {/* Album Art */}
+            <div
+              className={`flex flex-col items-center text-center transition-all duration-500 ${
+                layout === 'cinema'
+                  ? 'w-full max-w-lg'
+                  : layout === 'mini'
+                  ? 'w-full max-w-xs'
+                  : 'w-full max-w-md'
+              }`}
+            >
+              {/* Album Art (Sizes dynamically per layout) */}
               <div
-                className={`relative aspect-square w-56 md:w-64 rounded-3xl overflow-hidden border shadow-2xl mb-4 group flex items-center justify-center transition-all ${
-                  isDark
-                    ? 'bg-black/70 border-white/10 shadow-[0_20px_50px_rgba(0,0,0,0.85)]'
-                    : 'bg-white border-zinc-200/80 shadow-xl'
-                }`}
+                className={`relative aspect-square rounded-3xl overflow-hidden border shadow-2xl mb-4 group flex items-center justify-center transition-all duration-500 ${
+                  layout === 'cinema'
+                    ? 'w-64 md:w-80 shadow-[0_25px_60px_rgba(0,0,0,0.9)]'
+                    : layout === 'mini'
+                    ? 'w-40 md:w-44'
+                    : 'w-56 md:w-64'
+                } ${theme.panel}`}
               >
                 {playback?.albumArt ? (
                   <img
@@ -799,7 +876,7 @@ export default function HomePage() {
                     {devices.length > 0 && (
                       <button
                         onClick={() => handleTransferDevice(devices[0].id)}
-                        className="mt-2 px-3 py-1 bg-emerald-500 hover:bg-emerald-400 text-black text-[11px] font-bold rounded-full transition-all"
+                        className={`mt-2 px-3 py-1 text-[11px] font-bold rounded-full transition-all ${theme.accentBtn}`}
                       >
                         Wake Up {devices[0].name}
                       </button>
@@ -809,8 +886,12 @@ export default function HomePage() {
               </div>
 
               {/* Title & Artist */}
-              <div className="space-y-0.5 px-4 mb-4 w-full">
-                <h2 className="font-bold text-lg truncate tracking-tight">
+              <div className="space-y-0.5 px-4 mb-3 w-full">
+                <h2
+                  className={`font-bold truncate tracking-tight transition-all ${
+                    layout === 'cinema' ? 'text-2xl' : layout === 'mini' ? 'text-base' : 'text-lg'
+                  }`}
+                >
                   {playback?.name || 'Awaiting Track...'}
                 </h2>
                 <p className="text-xs font-medium opacity-60 truncate">
@@ -822,13 +903,11 @@ export default function HomePage() {
               <div className="w-full space-y-1 mb-4">
                 <div
                   onClick={handleSeek}
-                  className={`w-full h-1.5 rounded-full overflow-hidden cursor-pointer transition-colors relative ${
-                    isDark ? 'bg-white/[0.08] hover:bg-white/[0.14]' : 'bg-zinc-200 hover:bg-zinc-300'
-                  }`}
+                  className={`w-full h-1.5 rounded-full overflow-hidden cursor-pointer transition-colors relative ${theme.scrubBg}`}
                   title="Click to jump"
                 >
                   <div
-                    className="bg-emerald-500 h-full rounded-full transition-[width] duration-300 ease-linear"
+                    className={`h-full rounded-full transition-[width] duration-300 ease-linear ${theme.scrubFill}`}
                     style={{ width: `${progressPercent}%` }}
                   />
                 </div>
@@ -839,23 +918,25 @@ export default function HomePage() {
               </div>
 
               {/* Media Controls */}
-              <div className="flex items-center justify-center gap-8">
+              <div className={`flex items-center justify-center ${layout === 'mini' ? 'gap-5' : 'gap-8'}`}>
                 <button
                   onClick={handlePrev}
                   disabled={!playback}
                   className="p-2 opacity-70 hover:opacity-100 active:scale-90 disabled:opacity-30 transition-all"
                 >
-                  <SkipBack className="w-5 h-5 fill-current" />
+                  <SkipBack className={layout === 'mini' ? 'w-4 h-4' : 'w-5 h-5'} />
                 </button>
                 <button
                   onClick={togglePlay}
                   disabled={!playback}
-                  className="p-4 bg-emerald-500 hover:bg-emerald-400 disabled:opacity-30 text-black rounded-2xl shadow-xl shadow-emerald-500/25 transition-all hover:scale-105 active:scale-95"
+                  className={`rounded-2xl shadow-xl transition-all hover:scale-105 active:scale-95 disabled:opacity-30 ${
+                    layout === 'mini' ? 'p-3' : 'p-4'
+                  } ${theme.accentBtn}`}
                 >
                   {playback?.isPlaying ? (
-                    <Pause className="w-6 h-6 fill-current" />
+                    <Pause className={layout === 'mini' ? 'w-5 h-5 fill-current' : 'w-6 h-6 fill-current'} />
                   ) : (
-                    <Play className="w-6 h-6 fill-current ml-0.5" />
+                    <Play className={layout === 'mini' ? 'w-5 h-5 fill-current ml-0.5' : 'w-6 h-6 fill-current ml-0.5'} />
                   )}
                 </button>
                 <button
@@ -863,19 +944,17 @@ export default function HomePage() {
                   disabled={!playback}
                   className="p-2 opacity-70 hover:opacity-100 active:scale-90 disabled:opacity-30 transition-all"
                 >
-                  <SkipForward className="w-5 h-5 fill-current" />
+                  <SkipForward className={layout === 'mini' ? 'w-4 h-4' : 'w-5 h-5'} />
                 </button>
               </div>
             </div>
           </div>
 
-          {/* LOWER DECK: CLEAN CHAT (NO ERROR BADGES) */}
+          {/* LOWER DECK: WIDE CHAT */}
           <div
-            className={`w-full max-w-3xl mx-auto h-[20vh] border rounded-2xl backdrop-blur-2xl flex flex-col justify-between p-3 shrink-0 shadow-lg transition-colors ${
-              isDark
-                ? 'border-white/[0.06] bg-[#040507]/80'
-                : 'border-zinc-200/80 bg-white/80'
-            }`}
+            className={`w-full mx-auto border rounded-2xl backdrop-blur-2xl flex flex-col justify-between p-3 shrink-0 shadow-lg transition-all duration-300 ${
+              layout === 'mini' ? 'h-[16vh] max-w-sm' : 'h-[20vh] max-w-3xl'
+            } ${theme.panel}`}
           >
             <div className="flex-1 overflow-y-auto space-y-1.5 pr-2 text-xs">
               {messages.map((m, i) => (
@@ -885,11 +964,7 @@ export default function HomePage() {
                 >
                   <div
                     className={`px-3 py-1.5 rounded-xl max-w-[90%] leading-relaxed ${
-                      m.role === 'user'
-                        ? 'bg-emerald-500 text-black font-semibold'
-                        : isDark
-                        ? 'bg-white/[0.04] text-zinc-200 border border-white/[0.05]'
-                        : 'bg-zinc-100 text-zinc-800 border border-zinc-200'
+                      m.role === 'user' ? theme.accentBtn : 'bg-white/10 opacity-90'
                     }`}
                   >
                     {m.text}
@@ -897,8 +972,8 @@ export default function HomePage() {
                 </div>
               ))}
               {isAiLoading && (
-                <div className="flex items-center gap-1.5 text-[11px] text-emerald-500 font-mono animate-pulse">
-                  <Sparkles className="w-3 h-3" /> Thinking...
+                <div className="flex items-center gap-1.5 text-[11px] font-mono animate-pulse opacity-70">
+                  <Sparkles className="w-3 h-3 text-emerald-500" /> Thinking...
                 </div>
               )}
               <div ref={chatBottomRef} />
@@ -909,17 +984,13 @@ export default function HomePage() {
                 type="text"
                 value={chatInput}
                 onChange={(e) => setChatInput(e.target.value)}
-                placeholder="Ask music trivia, say 'play Silly Watch by Lil Uzi Vert', or 'unpause'..."
-                className={`flex-1 border rounded-xl px-3.5 py-2 text-xs focus:outline-none transition-colors ${
-                  isDark
-                    ? 'bg-white/[0.03] border-white/10 text-white placeholder:text-zinc-500 focus:border-emerald-500/60'
-                    : 'bg-zinc-50 border-zinc-200 text-zinc-900 placeholder:text-zinc-400 focus:border-emerald-500'
-                }`}
+                placeholder="Ask trivia, or say 'play Silly Watch by Lil Uzi Vert'..."
+                className={`flex-1 border rounded-xl px-3.5 py-2 text-xs focus:outline-none transition-colors ${theme.input}`}
               />
               <button
                 type="submit"
                 disabled={isAiLoading || !chatInput.trim()}
-                className="bg-emerald-500 hover:bg-emerald-400 disabled:opacity-40 text-black p-2 rounded-xl transition-all"
+                className={`p-2 rounded-xl transition-all disabled:opacity-40 ${theme.accentBtn}`}
               >
                 <Send className="w-3.5 h-3.5" />
               </button>
@@ -927,80 +998,208 @@ export default function HomePage() {
           </div>
         </main>
 
-        {/* RIGHT WING: QUEUE */}
-        <aside
-          className={`h-full w-64 border-l backdrop-blur-2xl flex flex-col shrink-0 overflow-hidden transition-colors duration-300 ${
-            isDark
-              ? 'border-white/[0.05] bg-black/40 text-zinc-100'
-              : 'border-zinc-200/80 bg-white/70 text-zinc-900 shadow-sm'
-          }`}
-        >
-          <div
-            className={`p-3.5 border-b flex items-center justify-between min-h-[44px] ${
-              isDark ? 'border-white/[0.04]' : 'border-zinc-200/60'
-            }`}
+        {/* RIGHT WING: QUEUE (Visible only in 'studio' layout) */}
+        {layout === 'studio' && (
+          <aside
+            className={`h-full w-64 border-l backdrop-blur-2xl flex flex-col shrink-0 overflow-hidden transition-all duration-300 ${theme.panel}`}
           >
-            <h2 className="text-xs font-mono uppercase tracking-wider font-semibold opacity-70">
-              Queue
-            </h2>
-          </div>
+            <div className={`p-3.5 border-b flex items-center justify-between min-h-[44px] ${theme.border}`}>
+              <h2 className="text-xs font-mono uppercase tracking-wider font-semibold opacity-70">
+                Queue
+              </h2>
+            </div>
 
-          <div className="flex-1 overflow-y-auto p-2 space-y-1.5 no-scrollbar">
-            {queue.length === 0 ? (
-              <div className="p-4 text-center text-xs opacity-50">Queue is empty</div>
-            ) : (
-              queue.map((track, idx) => {
-                const artistLine = Array.isArray(track?.artists)
-                  ? track.artists.map((a) => a?.name).filter(Boolean).join(', ')
-                  : 'Unknown Artist';
-
-                return (
+            <div className="flex-1 overflow-y-auto p-2 space-y-1.5 no-scrollbar">
+              {queue.length === 0 ? (
+                <div className="p-4 text-center text-xs opacity-50">Queue is empty</div>
+              ) : (
+                queue.map((track, idx) => (
                   <div
                     key={`${track.id || idx}-${idx}`}
                     onClick={() => track.uri && handlePlayTrack(track.uri)}
-                    className={`group rounded-xl cursor-pointer transition-all flex items-center gap-3 p-2 ${
-                      isDark ? 'hover:bg-white/[0.06]' : 'hover:bg-zinc-200/60'
-                    }`}
-                    title={`${track.name} - ${artistLine}`}
+                    className="group rounded-xl cursor-pointer hover:bg-white/10 transition-all flex items-center gap-3 p-2"
+                    title={`${track.name} - ${track.artists?.map((a) => a.name).join(', ')}`}
                   >
                     <img
                       src={track.album?.images?.[0]?.url || ''}
-                      alt={track.name || 'Song'}
+                      alt={track.name}
                       className="w-10 h-10 rounded-lg object-cover shadow-sm shrink-0"
                     />
                     <div className="truncate flex-1">
-                      <p className="text-xs font-semibold truncate group-hover:text-emerald-500 transition-colors">
+                      <p className={`text-xs font-semibold truncate transition-colors group-hover:${theme.accentText}`}>
                         {track.name}
                       </p>
-                      <p className="text-[10px] opacity-60 truncate">{artistLine}</p>
+                      <p className="text-[10px] opacity-60 truncate">
+                        {track.artists?.map((a) => a.name).join(', ')}
+                      </p>
                     </div>
                   </div>
-                );
-              })
-            )}
-          </div>
-        </aside>
+                ))
+              )}
+            </div>
+          </aside>
+        )}
       </div>
 
       {/* ======================================================== */}
-      {/* SPOTIFY CONNECT DEVICE SWITCHER MODAL                     */}
+      {/* ATMOSPHERE & LAYOUT MODAL (🎨 PALETTE BUTTON)            */}
       {/* ======================================================== */}
+      {showAtmosphereModal && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex items-center justify-center p-4">
+          <div className={`w-full max-w-lg rounded-3xl p-6 shadow-2xl space-y-6 border ${theme.modal}`}>
+            <div className="flex items-center justify-between border-b pb-3 border-inherit">
+              <div className="flex items-center gap-2">
+                <Palette className="w-5 h-5 text-emerald-500" />
+                <h3 className="font-bold text-sm">Atmosphere & Deck Setup</h3>
+              </div>
+              <button onClick={() => setShowAtmosphereModal(false)} className="opacity-50 hover:opacity-100 p-1">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* SECTION 1: LAYOUT PRESETS */}
+            <div className="space-y-2">
+              <label className="text-[11px] font-mono uppercase tracking-wider opacity-60 flex items-center gap-1.5">
+                <LayoutGrid className="w-3.5 h-3.5" /> Layout Mode
+              </label>
+              <div className="grid grid-cols-3 gap-2.5">
+                {/* Studio */}
+                <button
+                  onClick={() => changeLayout('studio')}
+                  className={`p-3 rounded-2xl border text-left space-y-1 transition-all ${
+                    layout === 'studio'
+                      ? 'border-emerald-500 ring-2 ring-emerald-500/20 bg-emerald-500/10'
+                      : 'border-white/10 hover:border-white/20'
+                  }`}
+                >
+                  <p className="font-bold text-xs flex items-center justify-between">
+                    Studio <LayoutGrid className="w-3.5 h-3.5 opacity-60" />
+                  </p>
+                  <p className="text-[10px] opacity-60 leading-tight">3-column command center with playlists & queue.</p>
+                </button>
+
+                {/* Cinema */}
+                <button
+                  onClick={() => changeLayout('cinema')}
+                  className={`p-3 rounded-2xl border text-left space-y-1 transition-all ${
+                    layout === 'cinema'
+                      ? 'border-emerald-500 ring-2 ring-emerald-500/20 bg-emerald-500/10'
+                      : 'border-white/10 hover:border-white/20'
+                  }`}
+                >
+                  <p className="font-bold text-xs flex items-center justify-between">
+                    Cinema <Maximize2 className="w-3.5 h-3.5 opacity-60" />
+                  </p>
+                  <p className="text-[10px] opacity-60 leading-tight">Sidebars hidden. Grand album art focus.</p>
+                </button>
+
+                {/* Mini */}
+                <button
+                  onClick={() => changeLayout('mini')}
+                  className={`p-3 rounded-2xl border text-left space-y-1 transition-all ${
+                    layout === 'mini'
+                      ? 'border-emerald-500 ring-2 ring-emerald-500/20 bg-emerald-500/10'
+                      : 'border-white/10 hover:border-white/20'
+                  }`}
+                >
+                  <p className="font-bold text-xs flex items-center justify-between">
+                    Mini <Minimize2 className="w-3.5 h-3.5 opacity-60" />
+                  </p>
+                  <p className="text-[10px] opacity-60 leading-tight">Compact card for multitasking & homework.</p>
+                </button>
+              </div>
+            </div>
+
+            {/* SECTION 2: COLOR PRESETS */}
+            <div className="space-y-2 border-t pt-4 border-inherit">
+              <label className="text-[11px] font-mono uppercase tracking-wider opacity-60 flex items-center gap-1.5">
+                <Palette className="w-3.5 h-3.5" /> Color Presets
+              </label>
+              <div className="grid grid-cols-3 gap-2">
+                {/* Obsidian */}
+                <button
+                  onClick={() => changeColorTheme('dark')}
+                  className={`p-2.5 rounded-2xl border flex items-center gap-2 text-xs font-semibold transition-all ${
+                    colorTheme === 'dark' ? 'border-emerald-500 bg-emerald-500/10' : 'border-white/10'
+                  }`}
+                >
+                  <span className="w-3.5 h-3.5 rounded-full bg-emerald-500 shrink-0" /> Obsidian
+                </button>
+
+                {/* Pearl Light */}
+                <button
+                  onClick={() => changeColorTheme('light')}
+                  className={`p-2.5 rounded-2xl border flex items-center gap-2 text-xs font-semibold transition-all ${
+                    colorTheme === 'light' ? 'border-emerald-500 bg-emerald-500/10' : 'border-white/10'
+                  }`}
+                >
+                  <span className="w-3.5 h-3.5 rounded-full bg-zinc-200 border border-zinc-400 shrink-0" /> Pearl Light
+                </button>
+
+                {/* Cyber Neon */}
+                <button
+                  onClick={() => changeColorTheme('neon')}
+                  className={`p-2.5 rounded-2xl border flex items-center gap-2 text-xs font-semibold transition-all ${
+                    colorTheme === 'neon' ? 'border-pink-500 bg-pink-500/10' : 'border-white/10'
+                  }`}
+                >
+                  <span className="w-3.5 h-3.5 rounded-full bg-gradient-to-tr from-pink-500 to-cyan-400 shrink-0" /> Cyber Neon
+                </button>
+
+                {/* Ocean Aqua */}
+                <button
+                  onClick={() => changeColorTheme('aqua')}
+                  className={`p-2.5 rounded-2xl border flex items-center gap-2 text-xs font-semibold transition-all ${
+                    colorTheme === 'aqua' ? 'border-cyan-400 bg-cyan-400/10' : 'border-white/10'
+                  }`}
+                >
+                  <span className="w-3.5 h-3.5 rounded-full bg-gradient-to-tr from-cyan-400 to-teal-400 shrink-0" /> Ocean Aqua
+                </button>
+
+                {/* Sunset Amber */}
+                <button
+                  onClick={() => changeColorTheme('amber')}
+                  className={`p-2.5 rounded-2xl border flex items-center gap-2 text-xs font-semibold transition-all ${
+                    colorTheme === 'amber' ? 'border-amber-500 bg-amber-500/10' : 'border-white/10'
+                  }`}
+                >
+                  <span className="w-3.5 h-3.5 rounded-full bg-gradient-to-tr from-amber-500 to-orange-500 shrink-0" /> Sunset Amber
+                </button>
+
+                {/* OLED Zero */}
+                <button
+                  onClick={() => changeColorTheme('oled')}
+                  className={`p-2.5 rounded-2xl border flex items-center gap-2 text-xs font-semibold transition-all ${
+                    colorTheme === 'oled' ? 'border-white bg-white/10' : 'border-white/10'
+                  }`}
+                >
+                  <span className="w-3.5 h-3.5 rounded-full bg-black border border-white shrink-0" /> OLED Zero
+                </button>
+              </div>
+            </div>
+
+            <div className="flex justify-end pt-2 border-t border-inherit">
+              <button
+                onClick={() => setShowAtmosphereModal(false)}
+                className={`px-5 py-2 text-xs font-bold rounded-xl shadow-md ${theme.accentBtn}`}
+              >
+                Apply Atmosphere
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* SPOTIFY CONNECT DEVICES MODAL */}
       {showDevicesModal && (
         <div className="fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex items-center justify-center p-4">
-          <div
-            className={`w-full max-w-md rounded-3xl p-6 shadow-2xl space-y-5 border transition-colors ${
-              isDark ? 'bg-[#0e1017] border-white/10 text-white' : 'bg-white border-zinc-200 text-zinc-900'
-            }`}
-          >
-            <div className={`flex items-center justify-between border-b pb-3 ${isDark ? 'border-white/[0.08]' : 'border-zinc-200'}`}>
+          <div className={`w-full max-w-md rounded-3xl p-6 shadow-2xl space-y-5 border ${theme.modal}`}>
+            <div className="flex items-center justify-between border-b pb-3 border-inherit">
               <div className="flex items-center gap-2">
                 <Radio className="w-4 h-4 text-emerald-500" />
                 <h3 className="font-bold text-sm">Spotify Connect Devices</h3>
               </div>
-              <button
-                onClick={() => setShowDevicesModal(false)}
-                className="opacity-50 hover:opacity-100 p-1"
-              >
+              <button onClick={() => setShowDevicesModal(false)} className="opacity-50 hover:opacity-100 p-1">
                 <X className="w-4 h-4" />
               </button>
             </div>
@@ -1009,7 +1208,6 @@ export default function HomePage() {
               Select which device receives the audio stream. Tap any device below to wake it up and resume playback remotely.
             </p>
 
-            {/* Device List */}
             <div className="space-y-2 max-h-60 overflow-y-auto">
               {devices.length === 0 ? (
                 <div className="p-4 text-center text-xs opacity-50 space-y-2">
@@ -1022,12 +1220,8 @@ export default function HomePage() {
                     key={d.id}
                     className={`flex items-center justify-between p-3 rounded-2xl border transition-all ${
                       d.is_active
-                        ? isDark
-                          ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300'
-                          : 'bg-emerald-50 border-emerald-300 text-emerald-800'
-                        : isDark
-                        ? 'bg-white/[0.03] border-white/[0.06] hover:bg-white/[0.07]'
-                        : 'bg-zinc-50 border-zinc-200 hover:bg-zinc-100'
+                        ? 'bg-emerald-500/10 border-emerald-500/30'
+                        : 'border-white/10 hover:bg-white/5'
                     }`}
                   >
                     <div className="flex items-center gap-3">
@@ -1052,7 +1246,7 @@ export default function HomePage() {
                     {!d.is_active && (
                       <button
                         onClick={() => handleTransferDevice(d.id)}
-                        className="px-3 py-1 bg-emerald-500 hover:bg-emerald-400 text-black text-[11px] font-bold rounded-xl transition-all shadow-sm"
+                        className={`px-3 py-1 text-[11px] font-bold rounded-xl transition-all shadow-sm ${theme.accentBtn}`}
                       >
                         Play Here
                       </button>
@@ -1069,10 +1263,7 @@ export default function HomePage() {
               >
                 <RefreshCw className="w-3 h-3" /> Refresh Device List
               </button>
-              <button
-                onClick={() => setShowDevicesModal(false)}
-                className="px-4 py-1.5 text-xs opacity-60 hover:opacity-100"
-              >
+              <button onClick={() => setShowDevicesModal(false)} className="px-4 py-1.5 text-xs opacity-60 hover:opacity-100">
                 Close
               </button>
             </div>
@@ -1083,51 +1274,15 @@ export default function HomePage() {
       {/* SETTINGS MODAL */}
       {showSettingsModal && (
         <div className="fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex items-center justify-center p-4">
-          <div
-            className={`w-full max-w-md rounded-3xl p-6 shadow-2xl space-y-5 border transition-colors ${
-              isDark ? 'bg-[#0e1017] border-white/10 text-white' : 'bg-white border-zinc-200 text-zinc-900'
-            }`}
-          >
-            <div className={`flex items-center justify-between border-b pb-3 ${isDark ? 'border-white/[0.08]' : 'border-zinc-200'}`}>
+          <div className={`w-full max-w-md rounded-3xl p-6 shadow-2xl space-y-5 border ${theme.modal}`}>
+            <div className="flex items-center justify-between border-b pb-3 border-inherit">
               <div className="flex items-center gap-2">
                 <Settings className="w-4 h-4 text-emerald-500" />
                 <h3 className="font-bold text-sm">Settings</h3>
               </div>
-              <button
-                onClick={() => setShowSettingsModal(false)}
-                className="opacity-50 hover:opacity-100 p-1"
-              >
+              <button onClick={() => setShowSettingsModal(false)} className="opacity-50 hover:opacity-100 p-1">
                 <X className="w-4 h-4" />
               </button>
-            </div>
-
-            {/* APPEARANCE */}
-            <div className="space-y-2">
-              <label className="text-[11px] font-mono uppercase tracking-wider opacity-60">
-                Appearance
-              </label>
-              <div className={`grid grid-cols-2 gap-2 p-1 rounded-2xl border ${isDark ? 'bg-black/40 border-white/10' : 'bg-zinc-100 border-zinc-200'}`}>
-                <button
-                  onClick={() => toggleTheme('dark')}
-                  className={`py-2 px-3 rounded-xl text-xs font-semibold flex items-center justify-center gap-2 transition-all ${
-                    isDark
-                      ? 'bg-zinc-800 text-white shadow-sm'
-                      : 'text-zinc-600 hover:text-black'
-                  }`}
-                >
-                  <Moon className="w-3.5 h-3.5" /> Dark
-                </button>
-                <button
-                  onClick={() => toggleTheme('light')}
-                  className={`py-2 px-3 rounded-xl text-xs font-semibold flex items-center justify-center gap-2 transition-all ${
-                    !isDark
-                      ? 'bg-white text-black shadow-sm'
-                      : 'text-zinc-400 hover:text-white'
-                  }`}
-                >
-                  <Sun className="w-3.5 h-3.5 text-amber-500" /> Light
-                </button>
-              </div>
             </div>
 
             {/* API KEY */}
@@ -1150,11 +1305,7 @@ export default function HomePage() {
                 value={keyInput}
                 onChange={(e) => setKeyInput(e.target.value)}
                 placeholder="Paste Groq key (gsk_...)"
-                className={`w-full rounded-xl px-3.5 py-2 text-xs font-mono border focus:outline-none ${
-                  isDark
-                    ? 'bg-black/60 border-white/10 text-white focus:border-emerald-500'
-                    : 'bg-zinc-50 border-zinc-200 text-zinc-900 focus:border-emerald-500'
-                }`}
+                className={`w-full rounded-xl px-3.5 py-2 text-xs font-mono border focus:outline-none ${theme.input}`}
               />
             </div>
 
@@ -1165,26 +1316,19 @@ export default function HomePage() {
               </label>
               <button
                 onClick={() => redirectToSpotifyAuth(spotifyClientId)}
-                className={`w-full py-2 px-3 rounded-xl text-xs font-medium border flex items-center justify-center gap-2 transition-colors ${
-                  isDark
-                    ? 'bg-white/[0.04] border-white/10 hover:bg-white/[0.08] text-zinc-300'
-                    : 'bg-zinc-100 border-zinc-200 hover:bg-zinc-200 text-zinc-800'
-                }`}
+                className="w-full py-2 px-3 rounded-xl text-xs font-medium border border-white/10 hover:bg-white/5 flex items-center justify-center gap-2 transition-colors"
               >
                 <RefreshCw className="w-3 h-3 text-emerald-500" /> Refresh Playlist Permissions
               </button>
             </div>
 
             <div className="flex justify-end gap-2 pt-2">
-              <button
-                onClick={() => setShowSettingsModal(false)}
-                className="px-3 py-1.5 text-xs opacity-60 hover:opacity-100"
-              >
+              <button onClick={() => setShowSettingsModal(false)} className="px-3 py-1.5 text-xs opacity-60 hover:opacity-100">
                 Close
               </button>
               <button
                 onClick={saveGeminiKey}
-                className="px-5 py-2 bg-emerald-500 hover:bg-emerald-400 text-black text-xs font-bold rounded-xl transition-all shadow-md shadow-emerald-500/20"
+                className={`px-5 py-2 text-xs font-bold rounded-xl transition-all shadow-md ${theme.accentBtn}`}
               >
                 Save
               </button>
@@ -1193,7 +1337,7 @@ export default function HomePage() {
         </div>
       )}
 
-      {/* Spotify Login Modal */}
+      {/* SPOTIFY LOGIN MODAL */}
       {showSpotifyModal && (
         <div className="fixed inset-0 bg-black/85 backdrop-blur-md z-50 flex items-center justify-center p-4">
           <div className="bg-[#0c0d12] border border-white/10 w-full max-w-md rounded-3xl p-7 shadow-2xl text-center space-y-5 text-white">
