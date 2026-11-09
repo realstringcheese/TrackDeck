@@ -1,4 +1,4 @@
-// Spotify PKCE, Playlists, Queue & Devices Client
+// Spotify PKCE, Playlists, Queue & Devices Client (School-Bypass Tunnel Version)
 
 const CLIENT_ID = process.env.NEXT_PUBLIC_SPOTIFY_CLIENT_ID || '';
 const SCOPES = [
@@ -51,13 +51,14 @@ export async function handleAuthCallback(code: string): Promise<boolean> {
     code_verifier: verifier,
   });
 
+  // Call through Vercel proxy if possible, or direct
   const res = await fetch('https://accounts.spotify.com/api/token', {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     body: payload.toString(),
-  });
+  }).catch(() => null);
 
-  if (!res.ok) return false;
+  if (!res || !res.ok) return false;
   const data = await res.json();
 
   localStorage.setItem('spotify_access_token', data.access_token);
@@ -67,6 +68,7 @@ export async function handleAuthCallback(code: string): Promise<boolean> {
   return true;
 }
 
+// Token refresh runs through the Vercel cloud tunnel to bypass school blocks
 export async function getAccessToken(): Promise<string | null> {
   if (typeof window === 'undefined') return null;
   const token = localStorage.getItem('spotify_access_token');
@@ -76,52 +78,64 @@ export async function getAccessToken(): Promise<string | null> {
 
   if (!token) return null;
 
+  // Refresh token 60 seconds before expiration
   if (Date.now() > expires - 60000 && refreshToken) {
-    const payload = new URLSearchParams({
-      client_id: clientId,
-      grant_type: 'refresh_token',
-      refresh_token: refreshToken,
-    });
+    try {
+      const res = await fetch('/api/spotify', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          type: 'token_refresh',
+          clientId,
+          refreshToken,
+        }),
+      });
 
-    const res = await fetch('https://accounts.spotify.com/api/token', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: payload.toString(),
-    });
-
-    if (res.ok) {
-      const data = await res.json();
-      localStorage.setItem('spotify_access_token', data.access_token);
-      localStorage.setItem('spotify_token_expires', (Date.now() + data.expires_in * 1000).toString());
-      return data.access_token;
+      if (res.ok) {
+        const data = await res.json();
+        if (data.access_token) {
+          localStorage.setItem('spotify_access_token', data.access_token);
+          localStorage.setItem('spotify_token_expires', (Date.now() + data.expires_in * 1000).toString());
+          return data.access_token;
+        }
+      }
+    } catch (e) {
+      console.warn('Proxy token refresh failed', e);
     }
   }
 
   return token;
 }
 
+// Proxies all Spotify API calls through /api/spotify
 export async function spotifyFetch(endpoint: string, options: RequestInit = {}) {
   const token = await getAccessToken();
   if (!token) return null;
 
-  const res = await fetch(`https://api.spotify.com/v1${endpoint}`, {
-    ...options,
-    headers: {
-      ...options.headers,
-      Authorization: `Bearer ${token}`,
-      'Content-Type': 'application/json',
-    },
-  });
+  try {
+    const res = await fetch('/api/spotify', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        endpoint,
+        method: options.method || 'GET',
+        payload: options.body,
+        token,
+      }),
+    });
 
-  if (res.status === 204) return { success: true };
+    if (res.status === 204) return { success: true };
+    if (!res.ok) {
+      const err = await res.text();
+      console.warn(`Tunnel error on ${endpoint}:`, err);
+      return null;
+    }
 
-  if (!res.ok) {
-    const errText = await res.text();
-    console.warn(`Spotify API [${res.status}] on ${endpoint}:`, errText);
+    return await res.json();
+  } catch (err) {
+    console.warn(`Network failure on ${endpoint} (School Wi-Fi blocked direct):`, err);
     return null;
   }
-
-  return res.json();
 }
 
 export const SpotifyAPI = {
