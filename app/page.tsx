@@ -27,6 +27,11 @@ import {
   Image as ImageIcon,
   Upload,
   Sliders,
+  CloudRain,
+  Zap,
+  Flame,
+  Snowflake,
+  Tv,
 } from 'lucide-react';
 import { getAccessToken, spotifyFetch, redirectToSpotifyAuth, SpotifyAPI } from '@/lib/spotify';
 import { askGemini, ChatMessage, CopilotResponse } from '@/lib/gemini';
@@ -58,38 +63,45 @@ interface SpotifyDevice {
 type LayoutPreset = 'studio' | 'cinema';
 type ColorPreset = 'dark' | 'light' | 'neon' | 'aqua' | 'amber' | 'oled';
 type BgMode = 'album' | 'preset' | 'custom';
+type WeatherEffect = 'none' | 'rain' | 'thunderstorm' | 'embers' | 'snow' | 'scanlines';
 
-// Curated High-Resolution Aesthetic Presets (Zero Git Bloat)
+// Curated Aesthetic Presets with Built-in Real-Time Weather Effects & Looping Media
 const PRESET_BACKGROUNDS = [
   {
+    id: 'thunderstorm-city',
+    name: 'Midnight Thunderstorm',
+    url: 'https://images.unsplash.com/photo-1511289081-d06dda19034d?q=80&w=1920&auto=format&fit=crop',
+    defaultEffect: 'thunderstorm' as WeatherEffect,
+  },
+  {
     id: 'tokyo-rain',
-    name: 'Tokyo Rain',
+    name: 'Tokyo Rain Shower',
     url: 'https://images.unsplash.com/photo-1514565131-fce0801e5785?q=80&w=1920&auto=format&fit=crop',
+    defaultEffect: 'rain' as WeatherEffect,
   },
   {
     id: 'cyberpunk-neon',
     name: 'Cyberpunk Alley',
     url: 'https://images.unsplash.com/photo-1508739773434-c26b3d09e071?q=80&w=1920&auto=format&fit=crop',
+    defaultEffect: 'scanlines' as WeatherEffect,
   },
   {
-    id: 'lofi-chill',
-    name: 'Cosmic Nebula',
-    url: 'https://images.unsplash.com/photo-1534447677768-be436bb09401?q=80&w=1920&auto=format&fit=crop',
+    id: 'cozy-fireplace',
+    name: 'Warm Hearth & Embers',
+    url: 'https://images.unsplash.com/photo-1542838132-92c53300491e?q=80&w=1920&auto=format&fit=crop',
+    defaultEffect: 'embers' as WeatherEffect,
   },
   {
-    id: 'vinyl-studio',
+    id: 'winter-peaks',
+    name: 'Alpine Blizzard',
+    url: 'https://images.unsplash.com/photo-1491555103944-7c647fd857e6?q=80&w=1920&auto=format&fit=crop',
+    defaultEffect: 'snow' as WeatherEffect,
+  },
+  {
+    id: 'analog-vinyl',
     name: 'Analog Vinyl Studio',
     url: 'https://images.unsplash.com/photo-1539185441755-769473a23570?q=80&w=1920&auto=format&fit=crop',
-  },
-  {
-    id: 'misty-forest',
-    name: 'Dark Forest',
-    url: 'https://images.unsplash.com/photo-1448375240586-882707db888b?q=80&w=1920&auto=format&fit=crop',
-  },
-  {
-    id: 'holographic-mesh',
-    name: 'Fluid Waves',
-    url: 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?q=80&w=1920&auto=format&fit=crop',
+    defaultEffect: 'none' as WeatherEffect,
   },
 ];
 
@@ -97,12 +109,15 @@ export default function HomePage() {
   const [layout, setLayout] = useState<LayoutPreset>('studio');
   const [colorTheme, setColorTheme] = useState<ColorPreset>('dark');
 
-  // Background Customizer State
-  const [bgMode, setBgMode] = useState<BgMode>('album');
+  // Background & Weather State
+  const [bgMode, setBgMode] = useState<BgMode>('preset');
   const [bgPresetUrl, setBgPresetUrl] = useState(PRESET_BACKGROUNDS[0].url);
   const [bgCustomUrl, setBgCustomUrl] = useState('');
-  const [bgBlur, setBgBlur] = useState<number>(16);
-  const [bgDim, setBgDim] = useState<number>(65);
+  const [weatherFx, setWeatherFx] = useState<WeatherEffect>('thunderstorm');
+
+  // Sliders
+  const [bgBlur, setBgBlur] = useState<number>(10);
+  const [bgDim, setBgDim] = useState<number>(55);
   const [bgPosY, setBgPosY] = useState<number>(50);
   const [bgScale, setBgScale] = useState<number>(105);
 
@@ -133,7 +148,7 @@ export default function HomePage() {
   const activeDeviceId = useRef<string | null>(null);
   const isActionPending = useRef(false);
 
-  // Devices & Collections
+  // Collections
   const [devices, setDevices] = useState<SpotifyDevice[]>([]);
   const [playlists, setPlaylists] = useState<Playlist[]>([]);
   const [selectedPlaylist, setSelectedPlaylist] = useState<Playlist | null>(null);
@@ -160,7 +175,7 @@ export default function HomePage() {
     const savedColor = (localStorage.getItem('trackdeck_color_theme') as ColorPreset) || 'dark';
     setColorTheme(savedColor);
 
-    const savedBgMode = (localStorage.getItem('trackdeck_bg_mode') as BgMode) || 'album';
+    const savedBgMode = (localStorage.getItem('trackdeck_bg_mode') as BgMode) || 'preset';
     setBgMode(savedBgMode);
 
     const savedBgPreset = localStorage.getItem('trackdeck_bg_preset') || PRESET_BACKGROUNDS[0].url;
@@ -169,10 +184,13 @@ export default function HomePage() {
     const savedBgCustom = localStorage.getItem('trackdeck_bg_custom') || '';
     setBgCustomUrl(savedBgCustom);
 
-    const savedBlur = Number(localStorage.getItem('trackdeck_bg_blur') ?? 16);
+    const savedFx = (localStorage.getItem('trackdeck_weather_fx') as WeatherEffect) || 'thunderstorm';
+    setWeatherFx(savedFx);
+
+    const savedBlur = Number(localStorage.getItem('trackdeck_bg_blur') ?? 10);
     setBgBlur(savedBlur);
 
-    const savedDim = Number(localStorage.getItem('trackdeck_bg_dim') ?? 65);
+    const savedDim = Number(localStorage.getItem('trackdeck_bg_dim') ?? 55);
     setBgDim(savedDim);
 
     const savedPosY = Number(localStorage.getItem('trackdeck_bg_pos_y') ?? 50);
@@ -223,11 +241,16 @@ export default function HomePage() {
     localStorage.setItem('trackdeck_color_theme', newTheme);
   }
 
+  function changeWeatherFx(fx: WeatherEffect) {
+    setWeatherFx(fx);
+    localStorage.setItem('trackdeck_weather_fx', fx);
+  }
+
   function updateBgParam(key: string, val: string | number) {
     localStorage.setItem(key, String(val));
   }
 
-  // In-Browser Image Compressor for Local Uploads (Never exceeds quota)
+  // In-Browser Image Compressor for Local Uploads
   function handleImageUpload(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -278,7 +301,7 @@ export default function HomePage() {
     return () => clearInterval(interval);
   }, [isAuthenticated]);
 
-  // Scrub Ticking
+  // Scrub Bar Ticking
   useEffect(() => {
     if (!playback?.isPlaying) return;
     const timer = setInterval(() => {
@@ -743,7 +766,7 @@ export default function HomePage() {
 
   const theme = themeClasses[colorTheme];
 
-  // Active Background Resolver
+  // Active Background Source
   const activeBgImage =
     bgMode === 'custom' && bgCustomUrl
       ? bgCustomUrl
@@ -756,30 +779,58 @@ export default function HomePage() {
       className={`h-screen w-screen overflow-hidden flex flex-col font-sans select-none transition-colors duration-500 ${theme.root}`}
     >
       {/* ======================================================== */}
-      {/* DYNAMIC BACKGROUND SYSTEM (BLUR, CROP, SCALE & OVERLAY)   */}
+      {/* 0. REAL-TIME BACKGROUND & WEATHER EFFECTS (BEHIND HUD)   */}
       {/* ======================================================== */}
       {activeBgImage && (
-        <>
+        <div className="fixed inset-0 pointer-events-none z-0 overflow-hidden">
+          {/* Background Wallpaper */}
           <div
-            className="fixed inset-0 pointer-events-none transition-all duration-700 z-0"
+            className="absolute inset-0 transition-all duration-700"
             style={{
               backgroundImage: `url(${activeBgImage})`,
               backgroundPosition: `center ${bgPosY}%`,
               backgroundSize: `${bgScale}%`,
               backgroundRepeat: 'no-repeat',
               filter: `blur(${bgBlur}px)`,
-              transform: 'scale(1.1)', // Prevents white blur edges
+              transform: 'scale(1.1)',
             }}
           />
+
           {/* Darkness Dimming Tint Overlay */}
           <div
-            className="fixed inset-0 pointer-events-none z-0 transition-opacity duration-500"
+            className="absolute inset-0 transition-opacity duration-500"
             style={{
               backgroundColor: colorTheme === 'light' ? '#ffffff' : '#000000',
               opacity: bgDim / 100,
             }}
           />
-        </>
+
+          {/* REAL-TIME WEATHER SHADERS */}
+          {/* A. Rain Layer */}
+          {(weatherFx === 'rain' || weatherFx === 'thunderstorm') && (
+            <div className="absolute inset-0 weather-rain opacity-60 pointer-events-none" />
+          )}
+
+          {/* B. Thunderstorm Lightning Flash Overlay */}
+          {weatherFx === 'thunderstorm' && (
+            <div className="absolute inset-0 weather-lightning pointer-events-none" />
+          )}
+
+          {/* C. Floating Embers */}
+          {weatherFx === 'embers' && (
+            <div className="absolute inset-0 weather-embers pointer-events-none" />
+          )}
+
+          {/* D. Snow Drift */}
+          {weatherFx === 'snow' && (
+            <div className="absolute inset-0 weather-snow pointer-events-none" />
+          )}
+
+          {/* E. Retro CRT Scanlines */}
+          {weatherFx === 'scanlines' && (
+            <div className="absolute inset-0 weather-scanlines pointer-events-none opacity-40" />
+          )}
+        </div>
       )}
 
       {/* ======================================================== */}
@@ -829,7 +880,7 @@ export default function HomePage() {
           {/* Atmosphere Palette Button */}
           <button
             onClick={() => setShowAtmosphereModal(true)}
-            title="Atmosphere, Wallpapers & Layout"
+            title="Atmosphere, Weather FX & Wallpapers"
             className="p-1.5 rounded-lg hover:bg-white/10 transition-colors flex items-center gap-1 text-xs"
           >
             <Palette className="w-4 h-4 text-emerald-500" />
@@ -1153,7 +1204,7 @@ export default function HomePage() {
       </div>
 
       {/* ======================================================== */}
-      {/* ATMOSPHERE, WALLPAPERS & SLIDERS MODAL (🎨 PALETTE)      */}
+      {/* ATMOSPHERE, WALLPAPERS & WEATHER FX MODAL (🎨 PALETTE)   */}
       {/* ======================================================== */}
       {showAtmosphereModal && (
         <div className="fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex items-center justify-center p-4">
@@ -1161,17 +1212,80 @@ export default function HomePage() {
             <div className="flex items-center justify-between border-b pb-3 border-inherit">
               <div className="flex items-center gap-2">
                 <Palette className="w-5 h-5 text-emerald-500" />
-                <h3 className="font-bold text-sm">Atmosphere & Wallpaper Studio</h3>
+                <h3 className="font-bold text-sm">Atmosphere & Weather Studio</h3>
               </div>
               <button onClick={() => setShowAtmosphereModal(false)} className="opacity-50 hover:opacity-100 p-1">
                 <X className="w-4 h-4" />
               </button>
             </div>
 
-            {/* 1. LAYOUT SELECTION (Studio vs Cinema) */}
+            {/* 1. REAL-TIME WEATHER FX OVERLAY */}
             <div className="space-y-2">
               <label className="text-[11px] font-mono uppercase tracking-wider opacity-60 flex items-center gap-1.5">
-                <LayoutGrid className="w-3.5 h-3.5" /> Layout Mode
+                <CloudRain className="w-3.5 h-3.5 text-cyan-400" /> Live Weather Shaders (Real-Time)
+              </label>
+
+              <div className="grid grid-cols-3 gap-2">
+                <button
+                  onClick={() => changeWeatherFx('none')}
+                  className={`p-2.5 rounded-xl border text-xs font-semibold flex items-center justify-center gap-1.5 transition-all ${
+                    weatherFx === 'none' ? 'border-emerald-500 bg-emerald-500/10' : 'border-white/10'
+                  }`}
+                >
+                  None
+                </button>
+
+                <button
+                  onClick={() => changeWeatherFx('rain')}
+                  className={`p-2.5 rounded-xl border text-xs font-semibold flex items-center justify-center gap-1.5 transition-all ${
+                    weatherFx === 'rain' ? 'border-cyan-400 bg-cyan-400/10 text-cyan-300' : 'border-white/10'
+                  }`}
+                >
+                  <CloudRain className="w-3.5 h-3.5" /> Rain
+                </button>
+
+                <button
+                  onClick={() => changeWeatherFx('thunderstorm')}
+                  className={`p-2.5 rounded-xl border text-xs font-semibold flex items-center justify-center gap-1.5 transition-all ${
+                    weatherFx === 'thunderstorm' ? 'border-amber-400 bg-amber-400/10 text-amber-300' : 'border-white/10'
+                  }`}
+                >
+                  <Zap className="w-3.5 h-3.5" /> Storm + Flash
+                </button>
+
+                <button
+                  onClick={() => changeWeatherFx('embers')}
+                  className={`p-2.5 rounded-xl border text-xs font-semibold flex items-center justify-center gap-1.5 transition-all ${
+                    weatherFx === 'embers' ? 'border-orange-500 bg-orange-500/10 text-orange-300' : 'border-white/10'
+                  }`}
+                >
+                  <Flame className="w-3.5 h-3.5" /> Embers
+                </button>
+
+                <button
+                  onClick={() => changeWeatherFx('snow')}
+                  className={`p-2.5 rounded-xl border text-xs font-semibold flex items-center justify-center gap-1.5 transition-all ${
+                    weatherFx === 'snow' ? 'border-sky-300 bg-sky-300/10 text-sky-200' : 'border-white/10'
+                  }`}
+                >
+                  <Snowflake className="w-3.5 h-3.5" /> Snow
+                </button>
+
+                <button
+                  onClick={() => changeWeatherFx('scanlines')}
+                  className={`p-2.5 rounded-xl border text-xs font-semibold flex items-center justify-center gap-1.5 transition-all ${
+                    weatherFx === 'scanlines' ? 'border-emerald-400 bg-emerald-400/10 text-emerald-300' : 'border-white/10'
+                  }`}
+                >
+                  <Tv className="w-3.5 h-3.5" /> CRT Scanlines
+                </button>
+              </div>
+            </div>
+
+            {/* 2. LAYOUT SELECTION */}
+            <div className="space-y-2 border-t pt-4 border-inherit">
+              <label className="text-[11px] font-mono uppercase tracking-wider opacity-60 flex items-center gap-1.5">
+                <LayoutGrid className="w-3.5 h-3.5" /> Layout View
               </label>
               <div className="grid grid-cols-2 gap-2.5">
                 <button
@@ -1183,7 +1297,7 @@ export default function HomePage() {
                   }`}
                 >
                   <p className="font-bold text-xs flex items-center justify-between">
-                    Studio <LayoutGrid className="w-3.5 h-3.5 opacity-60" />
+                    Studio Deck <LayoutGrid className="w-3.5 h-3.5 opacity-60" />
                   </p>
                   <p className="text-[10px] opacity-60 leading-tight">3-column command center with playlists & queue.</p>
                 </button>
@@ -1204,24 +1318,13 @@ export default function HomePage() {
               </div>
             </div>
 
-            {/* 2. BACKGROUND SOURCE SELECTOR */}
+            {/* 3. WALLPAPER PRESETS */}
             <div className="space-y-2 border-t pt-4 border-inherit">
               <label className="text-[11px] font-mono uppercase tracking-wider opacity-60 flex items-center gap-1.5">
-                <ImageIcon className="w-3.5 h-3.5" /> Wallpaper Source
+                <ImageIcon className="w-3.5 h-3.5" /> Wallpapers & Atmospheric Scenes
               </label>
 
               <div className="grid grid-cols-3 gap-2">
-                <button
-                  onClick={() => {
-                    setBgMode('album');
-                    updateBgParam('trackdeck_bg_mode', 'album');
-                  }}
-                  className={`p-2.5 rounded-xl border text-xs font-semibold transition-all ${
-                    bgMode === 'album' ? 'border-emerald-500 bg-emerald-500/10' : 'border-white/10'
-                  }`}
-                >
-                  Album Glow
-                </button>
                 <button
                   onClick={() => {
                     setBgMode('preset');
@@ -1235,6 +1338,17 @@ export default function HomePage() {
                 </button>
                 <button
                   onClick={() => {
+                    setBgMode('album');
+                    updateBgParam('trackdeck_bg_mode', 'album');
+                  }}
+                  className={`p-2.5 rounded-xl border text-xs font-semibold transition-all ${
+                    bgMode === 'album' ? 'border-emerald-500 bg-emerald-500/10' : 'border-white/10'
+                  }`}
+                >
+                  Album Glow
+                </button>
+                <button
+                  onClick={() => {
                     setBgMode('custom');
                     updateBgParam('trackdeck_bg_mode', 'custom');
                   }}
@@ -1242,11 +1356,10 @@ export default function HomePage() {
                     bgMode === 'custom' ? 'border-emerald-500 bg-emerald-500/10' : 'border-white/10'
                   }`}
                 >
-                  Custom Photo
+                  Custom Upload
                 </button>
               </div>
 
-              {/* PRESETS GRID */}
               {bgMode === 'preset' && (
                 <div className="grid grid-cols-3 gap-2 pt-2">
                   {PRESET_BACKGROUNDS.map((preset) => (
@@ -1255,6 +1368,7 @@ export default function HomePage() {
                       onClick={() => {
                         setBgPresetUrl(preset.url);
                         updateBgParam('trackdeck_bg_preset', preset.url);
+                        changeWeatherFx(preset.defaultEffect);
                       }}
                       className={`relative aspect-video rounded-xl overflow-hidden border transition-all group ${
                         bgPresetUrl === preset.url ? 'border-emerald-500 ring-2 ring-emerald-500/40' : 'border-white/10'
@@ -1269,30 +1383,28 @@ export default function HomePage() {
                 </div>
               )}
 
-              {/* CUSTOM UPLOAD BOX */}
               {bgMode === 'custom' && (
                 <div className="pt-2 space-y-2">
                   <label className="border-2 border-dashed border-white/20 hover:border-emerald-500 rounded-2xl p-4 flex flex-col items-center justify-center cursor-pointer transition-colors bg-white/[0.02]">
                     <Upload className="w-6 h-6 text-emerald-500 mb-1" />
-                    <span className="text-xs font-semibold">Upload Photo from Chromebook</span>
+                    <span className="text-xs font-semibold">Upload Photo / GIF from Device</span>
                     <span className="text-[10px] opacity-50">Auto-compressed into browser memory</span>
                     <input type="file" accept="image/*" onChange={handleImageUpload} className="hidden" />
                   </label>
-
                   {bgCustomUrl && (
-                    <p className="text-[10px] text-emerald-400 font-mono text-center">✓ Custom photo loaded</p>
+                    <p className="text-[10px] text-emerald-400 font-mono text-center">✓ Custom wallpaper active</p>
                   )}
                 </div>
               )}
             </div>
 
-            {/* 3. WALLPAPER SLIDERS (BLUR, DIM, CROP & SCALE) */}
+            {/* 4. WALLPAPER SLIDERS */}
             <div className="space-y-3.5 border-t pt-4 border-inherit">
               <label className="text-[11px] font-mono uppercase tracking-wider opacity-60 flex items-center gap-1.5">
-                <Sliders className="w-3.5 h-3.5" /> Wallpaper Adjustment Controls
+                <Sliders className="w-3.5 h-3.5" /> Adjust Image Focus & Blur
               </label>
 
-              {/* Blur Slider */}
+              {/* Blur */}
               <div className="space-y-1">
                 <div className="flex justify-between text-xs">
                   <span>Blur Intensity</span>
@@ -1312,10 +1424,10 @@ export default function HomePage() {
                 />
               </div>
 
-              {/* Dimming Darkness Slider */}
+              {/* Darkness Dim */}
               <div className="space-y-1">
                 <div className="flex justify-between text-xs">
-                  <span>Darkness Tint (Readability)</span>
+                  <span>Darkness Tint (HUD Contrast)</span>
                   <span className="font-mono opacity-60">{bgDim}%</span>
                 </div>
                 <input
@@ -1332,10 +1444,10 @@ export default function HomePage() {
                 />
               </div>
 
-              {/* Vertical Crop Alignment Slider */}
+              {/* Vertical Crop */}
               <div className="space-y-1">
                 <div className="flex justify-between text-xs">
-                  <span>Vertical Crop Position</span>
+                  <span>Vertical Crop Focus</span>
                   <span className="font-mono opacity-60">
                     {bgPosY < 35 ? 'Top' : bgPosY > 65 ? 'Bottom' : 'Center'} ({bgPosY}%)
                   </span>
@@ -1354,7 +1466,7 @@ export default function HomePage() {
                 />
               </div>
 
-              {/* Zoom Scale Slider */}
+              {/* Zoom Scale */}
               <div className="space-y-1">
                 <div className="flex justify-between text-xs">
                   <span>Zoom / Scale</span>
@@ -1375,10 +1487,10 @@ export default function HomePage() {
               </div>
             </div>
 
-            {/* 4. COLOR ACCENTS */}
+            {/* 5. COLOR PALETTES */}
             <div className="space-y-2 border-t pt-4 border-inherit">
               <label className="text-[11px] font-mono uppercase tracking-wider opacity-60">
-                Color Preset
+                Accent Themes
               </label>
               <div className="grid grid-cols-3 gap-2">
                 <button
