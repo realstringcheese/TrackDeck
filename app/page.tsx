@@ -1,5 +1,8 @@
 'use client';
 
+// ============================================================================
+// SECTION 1: IMPORTS & TYPES
+// ============================================================================
 import { useState, useEffect, useRef } from 'react';
 import {
   Play,
@@ -34,9 +37,16 @@ import {
   Tv,
   Check,
   Wand2,
+  Mic2,
+  Volume2,
+  Compass,
+  Activity,
+  Layers,
 } from 'lucide-react';
 import { getAccessToken, spotifyFetch, redirectToSpotifyAuth, SpotifyAPI } from '@/lib/spotify';
 import { askGemini, ChatMessage, CopilotResponse } from '@/lib/gemini';
+import { fetchSyncedLyrics, LyricLine } from '@/lib/lyrics';
+import { detectLocalWeather, LocalWeatherReport } from '@/lib/weather';
 
 interface Playlist {
   id: string;
@@ -67,8 +77,14 @@ type ColorPreset = 'dark' | 'light' | 'neon' | 'aqua' | 'amber' | 'oled';
 type BgMode = 'album' | 'gallery' | 'custom';
 type WeatherEffect = 'none' | 'rain' | 'thunderstorm' | 'embers' | 'snow' | 'scanlines';
 type AtmosphereMode = 'presets' | 'custom_builder';
+type AmbientSoundType = 'off' | 'rain' | 'hearth' | 'wind';
 
-// Curated Wallpapers (Strictly Zero People, Pure Atmospheres)
+// ============================================================================
+// SECTION 2: CONFIGURATION & PRESET DATA
+// (Tip: Add your own wallpapers, color themes, and sounds here!)
+// ============================================================================
+
+// A. Curated Wallpapers (Strictly Zero People, Pure Atmospheres)
 const GALLERY_WALLPAPERS = [
   {
     id: 'thunderstorm-sky',
@@ -107,35 +123,38 @@ const GALLERY_WALLPAPERS = [
   },
 ];
 
-// Curated 1-Click Vibe Packs
+// B. 1-Click Complete Vibe Packs
 const VIBE_PRESETS = [
   {
     id: 'thunderstorm-pack',
     name: 'Midnight Thunderstorm',
-    desc: 'Fork lightning over storm clouds with falling rain & slate accents',
+    desc: 'Lightning storm clouds with falling rain & slate accents',
     url: GALLERY_WALLPAPERS[0].url,
     effect: 'thunderstorm' as WeatherEffect,
     color: 'dark' as ColorPreset,
+    sound: 'rain' as AmbientSoundType,
     blur: 6,
     dim: 50,
   },
   {
     id: 'alpine-pack',
     name: 'Alpine Blizzard',
-    desc: 'Pristine snow-capped mountain valley with realistic drifting snow & silver accents',
+    desc: 'Snow-capped mountain valley with realistic drifting snow & silver accents',
     url: GALLERY_WALLPAPERS[1].url,
     effect: 'snow' as WeatherEffect,
     color: 'oled' as ColorPreset,
+    sound: 'wind' as AmbientSoundType,
     blur: 8,
     dim: 45,
   },
   {
     id: 'hearth-pack',
     name: 'Cozy Hearth & Fire',
-    desc: 'Close-up crackling fireplace with rising embers & warm amber accents',
+    desc: 'Crackling fireplace with rising embers & warm amber accents',
     url: GALLERY_WALLPAPERS[2].url,
     effect: 'embers' as WeatherEffect,
     color: 'amber' as ColorPreset,
+    sound: 'hearth' as AmbientSoundType,
     blur: 10,
     dim: 55,
   },
@@ -146,6 +165,7 @@ const VIBE_PRESETS = [
     url: GALLERY_WALLPAPERS[3].url,
     effect: 'rain' as WeatherEffect,
     color: 'neon' as ColorPreset,
+    sound: 'rain' as AmbientSoundType,
     blur: 8,
     dim: 55,
   },
@@ -156,6 +176,7 @@ const VIBE_PRESETS = [
     url: GALLERY_WALLPAPERS[5].url,
     effect: 'scanlines' as WeatherEffect,
     color: 'dark' as ColorPreset,
+    sound: 'off' as AmbientSoundType,
     blur: 12,
     dim: 65,
   },
@@ -166,17 +187,122 @@ const VIBE_PRESETS = [
     url: GALLERY_WALLPAPERS[6].url,
     effect: 'snow' as WeatherEffect,
     color: 'aqua' as ColorPreset,
+    sound: 'off' as AmbientSoundType,
     blur: 12,
     dim: 50,
   },
 ];
 
+// C. Ambient Background Audio Streams (Layered softly under Spotify)
+const AMBIENT_SOUND_URLS: Record<AmbientSoundType, string> = {
+  off: '',
+  rain: 'https://assets.mixkit.co/active_storage/sfx/1253/1253-preview.mp3',
+  hearth: 'https://assets.mixkit.co/active_storage/sfx/2471/2471-preview.mp3',
+  wind: 'https://assets.mixkit.co/active_storage/sfx/1271/1271-preview.mp3',
+};
+
+// D. Color Palette Styling Tokens
+const THEME_CLASSES: Record<
+  ColorPreset,
+  {
+    root: string;
+    topBar: string;
+    panel: string;
+    border: string;
+    accentBtn: string;
+    accentText: string;
+    scrubBg: string;
+    scrubFill: string;
+    modal: string;
+    input: string;
+  }
+> = {
+  dark: {
+    root: 'bg-[#07080b] text-zinc-100',
+    topBar: 'bg-[#040507]/90 border-white/[0.05] text-white',
+    panel: 'bg-black/40 text-zinc-100 border-white/[0.05]',
+    border: 'border-white/[0.05]',
+    accentBtn: 'bg-emerald-500 hover:bg-emerald-400 text-black shadow-emerald-500/20',
+    accentText: 'text-emerald-500',
+    scrubBg: 'bg-white/[0.08] hover:bg-white/[0.14]',
+    scrubFill: 'bg-emerald-500',
+    modal: 'bg-[#0e1017] border-white/10 text-white',
+    input: 'bg-white/[0.03] border-white/10 text-white placeholder:text-zinc-500 focus:border-emerald-500/60',
+  },
+  light: {
+    root: 'bg-[#f4f5f8] text-zinc-900',
+    topBar: 'bg-white/80 border-zinc-200/80 text-zinc-900 shadow-sm',
+    panel: 'bg-white/70 text-zinc-900 border-zinc-200/80 shadow-sm',
+    border: 'border-zinc-200/80',
+    accentBtn: 'bg-emerald-500 hover:bg-emerald-400 text-black shadow-emerald-500/10',
+    accentText: 'text-emerald-600',
+    scrubBg: 'bg-zinc-200 hover:bg-zinc-300',
+    scrubFill: 'bg-emerald-500',
+    modal: 'bg-white border-zinc-200 text-zinc-900',
+    input: 'bg-zinc-50 border-zinc-200 text-zinc-900 placeholder:text-zinc-400 focus:border-emerald-500',
+  },
+  neon: {
+    root: 'bg-[#0a0518] text-pink-50',
+    topBar: 'bg-[#070212]/90 border-pink-500/20 text-white',
+    panel: 'bg-[#120826]/60 text-pink-50 border-pink-500/20 shadow-pink-950/20',
+    border: 'border-pink-500/20',
+    accentBtn: 'bg-gradient-to-r from-pink-500 to-rose-500 hover:from-pink-400 hover:to-rose-400 text-white shadow-pink-500/30',
+    accentText: 'text-cyan-400',
+    scrubBg: 'bg-pink-950/40 hover:bg-pink-900/50',
+    scrubFill: 'bg-gradient-to-r from-cyan-400 to-pink-500',
+    modal: 'bg-[#120826] border-pink-500/30 text-white',
+    input: 'bg-pink-950/20 border-pink-500/30 text-white placeholder:text-pink-400/50 focus:border-cyan-400',
+  },
+  aqua: {
+    root: 'bg-[#040d1a] text-cyan-50',
+    topBar: 'bg-[#02070e]/90 border-cyan-500/20 text-white',
+    panel: 'bg-[#081b33]/60 text-cyan-50 border-cyan-500/20 shadow-cyan-950/20',
+    border: 'border-cyan-500/20',
+    accentBtn: 'bg-gradient-to-r from-cyan-400 to-teal-400 hover:from-cyan-300 hover:to-teal-300 text-black shadow-cyan-500/30',
+    accentText: 'text-cyan-400',
+    scrubBg: 'bg-cyan-950/40 hover:bg-cyan-900/50',
+    scrubFill: 'bg-gradient-to-r from-cyan-400 to-teal-300',
+    modal: 'bg-[#081b33] border-cyan-500/30 text-white',
+    input: 'bg-cyan-950/20 border-cyan-500/30 text-white placeholder:text-cyan-400/50 focus:border-teal-400',
+  },
+  amber: {
+    root: 'bg-[#100a06] text-amber-50',
+    topBar: 'bg-[#090503]/90 border-amber-500/20 text-white',
+    panel: 'bg-[#1a0f07]/60 text-amber-50 border-amber-500/20 shadow-amber-950/20',
+    border: 'border-amber-500/20',
+    accentBtn: 'bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 text-black shadow-amber-500/30',
+    accentText: 'text-amber-400',
+    scrubBg: 'bg-amber-950/40 hover:bg-amber-900/50',
+    scrubFill: 'bg-gradient-to-r from-amber-400 to-orange-400',
+    modal: 'bg-[#1a0f07] border-amber-500/30 text-white',
+    input: 'bg-amber-950/20 border-amber-500/30 text-white placeholder:text-amber-400/50 focus:border-amber-400',
+  },
+  oled: {
+    root: 'bg-[#000000] text-white',
+    topBar: 'bg-[#000000] border-zinc-800 text-white',
+    panel: 'bg-[#000000] text-white border-zinc-850',
+    border: 'border-zinc-850',
+    accentBtn: 'bg-white hover:bg-zinc-200 text-black shadow-white/10',
+    accentText: 'text-zinc-400',
+    scrubBg: 'bg-zinc-900 hover:bg-zinc-800',
+    scrubFill: 'bg-white',
+    modal: 'bg-[#000000] border-zinc-800 text-white',
+    input: 'bg-zinc-950 border-zinc-800 text-white placeholder:text-zinc-600 focus:border-white',
+  },
+};
+
 export default function HomePage() {
+  // ============================================================================
+  // SECTION 3: COMPONENT STATE
+  // ============================================================================
+  
+  // A. View & Theme State
   const [layout, setLayout] = useState<LayoutPreset>('studio');
   const [colorTheme, setColorTheme] = useState<ColorPreset>('dark');
   const [atmoMode, setAtmoMode] = useState<AtmosphereMode>('presets');
+  const [centerMode, setCenterMode] = useState<'deck' | 'lyrics'>('deck');
 
-  // Custom Deck Builder States
+  // B. Wallpaper & Camera State
   const [bgMode, setBgMode] = useState<BgMode>('gallery');
   const [selectedGalleryUrl, setSelectedGalleryUrl] = useState(GALLERY_WALLPAPERS[1].url);
   const [bgCustomUrl, setBgCustomUrl] = useState('');
@@ -185,25 +311,20 @@ export default function HomePage() {
   const [bgPosY, setBgPosY] = useState<number>(50);
   const [bgScale, setBgScale] = useState<number>(105);
 
-  // Weather FX State & Sliders
+  // C. Real-Time Weather & Soundscape State
   const [weatherFx, setWeatherFx] = useState<WeatherEffect>('snow');
   const [fxDensity, setFxDensity] = useState<number>(50);
   const [fxSpeed, setFxSpeed] = useState<number>(50);
+  const [ambientSound, setAmbientSound] = useState<AmbientSoundType>('off');
+  const [ambientVolume, setAmbientVolume] = useState<number>(40);
+  const [localWeather, setLocalWeather] = useState<LocalWeatherReport | null>(null);
+  const [isDetectingWeather, setIsDetectingWeather] = useState(false);
 
-  // Modals
+  // D. Spotify Playback & Track Info
   const [isAuthenticated, setIsAuthenticated] = useState<boolean | null>(null);
   const [spotifyClientId, setSpotifyClientId] = useState('');
-  const [showSpotifyModal, setShowSpotifyModal] = useState(false);
-  const [showSettingsModal, setShowSettingsModal] = useState(false);
-  const [showDevicesModal, setShowDevicesModal] = useState(false);
-  const [showAtmosphereModal, setShowAtmosphereModal] = useState(false);
-
-  // Key
-  const [geminiKey, setGeminiKey] = useState<string>('');
-  const [keyInput, setKeyInput] = useState('');
-
-  // Playback
   const [playback, setPlayback] = useState<{
+    id?: string;
     name: string;
     artist: string;
     album: string;
@@ -215,19 +336,20 @@ export default function HomePage() {
     lastSyncTime: number;
   } | null>(null);
 
-  const activeDeviceId = useRef<string | null>(null);
-  const isActionPending = useRef(false);
-  const canvasRef = useRef<HTMLCanvasElement | null>(null);
-
-  // Collections
+  // E. Devices, Playlists & Queue
   const [devices, setDevices] = useState<SpotifyDevice[]>([]);
   const [playlists, setPlaylists] = useState<Playlist[]>([]);
   const [selectedPlaylist, setSelectedPlaylist] = useState<Playlist | null>(null);
   const [playlistTracks, setPlaylistTracks] = useState<TrackItem[]>([]);
   const [isLoadingTracks, setIsLoadingTracks] = useState(false);
   const [queue, setQueue] = useState<TrackItem[]>([]);
+  const [lyrics, setLyrics] = useState<LyricLine[] | null>(null);
+  const [currentLyricIdx, setCurrentLyricIdx] = useState<number>(-1);
+  const [sonicDna, setSonicDna] = useState<{ bpm: number; key: string; energy: number } | null>(null);
 
-  // Chat
+  // F. AI Copilot Chat State
+  const [geminiKey, setGeminiKey] = useState<string>('');
+  const [keyInput, setKeyInput] = useState('');
   const [messages, setMessages] = useState<ChatMessage[]>([
     {
       role: 'model',
@@ -236,9 +358,26 @@ export default function HomePage() {
   ]);
   const [chatInput, setChatInput] = useState('');
   const [isAiLoading, setIsAiLoading] = useState(false);
-  const chatBottomRef = useRef<HTMLDivElement>(null);
 
-  // Initial Load
+  // G. Modals Visibility
+  const [showSpotifyModal, setShowSpotifyModal] = useState(false);
+  const [showSettingsModal, setShowSettingsModal] = useState(false);
+  const [showDevicesModal, setShowDevicesModal] = useState(false);
+  const [showAtmosphereModal, setShowAtmosphereModal] = useState(false);
+
+  // H. Refs
+  const activeDeviceId = useRef<string | null>(null);
+  const isActionPending = useRef(false);
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const ambientAudioRef = useRef<HTMLAudioElement | null>(null);
+  const lyricsContainerRef = useRef<HTMLDivElement | null>(null);
+  const chatBottomRef = useRef<HTMLDivElement | null>(null);
+
+  // ============================================================================
+  // SECTION 4: LIFECYCLE & BACKGROUND PROCESSES
+  // ============================================================================
+
+  // 1. Initial Load & LocalStorage Hydration
   useEffect(() => {
     const savedLayout = (localStorage.getItem('trackdeck_layout') as LayoutPreset) || 'studio';
     setLayout(savedLayout === 'studio' || savedLayout === 'cinema' ? savedLayout : 'studio');
@@ -306,83 +445,114 @@ export default function HomePage() {
         setShowSpotifyModal(true);
       }
     });
+
+    detectLocalWeather().then(setLocalWeather);
   }, []);
 
-  function applyVibePreset(preset: typeof VIBE_PRESETS[0]) {
-    setBgMode('gallery');
-    setSelectedGalleryUrl(preset.url);
-    setWeatherFx(preset.effect);
-    setColorTheme(preset.color);
-    setBgBlur(preset.blur);
-    setBgDim(preset.dim);
+  // 2. Background Polling (Playback & Queue)
+  useEffect(() => {
+    if (!isAuthenticated) return;
+    const interval = setInterval(fetchNowPlaying, 1500);
+    return () => clearInterval(interval);
+  }, [isAuthenticated]);
 
-    localStorage.setItem('trackdeck_bg_mode', 'gallery');
-    localStorage.setItem('trackdeck_bg_gallery', preset.url);
-    localStorage.setItem('trackdeck_weather_fx', preset.effect);
-    localStorage.setItem('trackdeck_color_theme', preset.color);
-    localStorage.setItem('trackdeck_bg_blur', String(preset.blur));
-    localStorage.setItem('trackdeck_bg_dim', String(preset.dim));
-  }
+  useEffect(() => {
+    if (!isAuthenticated) return;
+    const interval = setInterval(loadQueue, 10000);
+    return () => clearInterval(interval);
+  }, [isAuthenticated]);
 
-  function changeLayout(newLayout: LayoutPreset) {
-    setLayout(newLayout);
-    localStorage.setItem('trackdeck_layout', newLayout);
-  }
+  // 3. Sub-Second Smooth Progress Ticker
+  useEffect(() => {
+    if (!playback?.isPlaying) return;
+    const timer = setInterval(() => {
+      setPlayback((prev) => {
+        if (!prev || !prev.isPlaying) return prev;
+        const elapsed = Date.now() - prev.lastSyncTime;
+        const currentProgress = Math.min(prev.durationMs, prev.progressMs + elapsed);
+        return {
+          ...prev,
+          progressMs: currentProgress,
+          lastSyncTime: Date.now(),
+        };
+      });
+    }, 500);
+    return () => clearInterval(timer);
+  }, [playback?.isPlaying]);
 
-  function changeColorTheme(newTheme: ColorPreset) {
-    setColorTheme(newTheme);
-    localStorage.setItem('trackdeck_color_theme', newTheme);
-  }
+  // 4. Ambient Audio Synthesizer Controller
+  useEffect(() => {
+    if (!ambientAudioRef.current) return;
+    ambientAudioRef.current.volume = ambientVolume / 100;
+    if (ambientSound === 'off') {
+      ambientAudioRef.current.pause();
+    } else {
+      ambientAudioRef.current.play().catch(() => {});
+    }
+  }, [ambientSound, ambientVolume]);
 
-  function changeWeatherFx(fx: WeatherEffect) {
-    setWeatherFx(fx);
-    localStorage.setItem('trackdeck_weather_fx', fx);
-  }
+  // 5. Track Metadata Change: Fetch Lyrics & Sonic DNA
+  useEffect(() => {
+    if (!playback?.name || !playback?.artist) return;
 
-  function updateParam(key: string, val: string | number) {
-    localStorage.setItem(key, String(val));
-  }
+    fetchSyncedLyrics(playback.name, playback.artist, playback.album, playback.durationMs / 1000).then(
+      (lines) => {
+        setLyrics(lines);
+        setCurrentLyricIdx(-1);
+      }
+    );
 
-  function handleImageUpload(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      const img = new Image();
-      img.onload = () => {
-        const canvas = document.createElement('canvas');
-        const maxDim = 1280;
-        let w = img.width;
-        let h = img.height;
-        if (w > maxDim || h > maxDim) {
-          if (w > h) {
-            h = Math.round((h * maxDim) / w);
-            w = maxDim;
+    if (playback.id) {
+      spotifyFetch(`/audio-features/${playback.id}`)
+        .then((data) => {
+          if (data && data.tempo) {
+            const pitchClasses = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
+            const keyName = pitchClasses[data.key] || 'C';
+            const modeName = data.mode === 1 ? 'Maj' : 'Min';
+            setSonicDna({
+              bpm: Math.round(data.tempo),
+              key: `${keyName} ${modeName}`,
+              energy: Math.round(data.energy * 100),
+            });
           } else {
-            w = Math.round((w * maxDim) / h);
-            h = maxDim;
+            setSonicDna(null);
           }
-        }
-        canvas.width = w;
-        canvas.height = h;
-        const ctx = canvas.getContext('2d');
-        ctx?.drawImage(img, 0, 0, w, h);
-        const compressed = canvas.toDataURL('image/jpeg', 0.8);
+        })
+        .catch(() => setSonicDna(null));
+    }
+  }, [playback?.name, playback?.artist, playback?.id]);
 
-        setBgCustomUrl(compressed);
-        setBgMode('custom');
-        localStorage.setItem('trackdeck_bg_custom', compressed);
-        localStorage.setItem('trackdeck_bg_mode', 'custom');
-      };
-      img.src = event.target?.result as string;
-    };
-    reader.readAsDataURL(file);
-  }
+  // 6. Real-Time Karaoke Lyrics Scroller
+  useEffect(() => {
+    if (!lyrics || !playback?.progressMs) return;
+    const curTime = playback.progressMs;
+    let activeIdx = -1;
 
-  // ========================================================
-  // HYPER-REALISTIC CANVAS WEATHER SIMULATION
-  // ========================================================
+    for (let i = 0; i < lyrics.length; i++) {
+      if (curTime >= lyrics[i].timeMs) {
+        activeIdx = i;
+      } else {
+        break;
+      }
+    }
+
+    if (activeIdx !== currentLyricIdx) {
+      setCurrentLyricIdx(activeIdx);
+      const activeEl = document.getElementById(`lyric-line-${activeIdx}`);
+      if (activeEl) {
+        activeEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }
+    }
+  }, [playback?.progressMs, lyrics, currentLyricIdx]);
+
+  // 7. Auto-scroll chat to bottom
+  useEffect(() => {
+    chatBottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages]);
+
+  // ============================================================================
+  // SECTION 5: REAL-TIME 2D CANVAS WEATHER SHADER ENGINE
+  // ============================================================================
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas || weatherFx === 'none' || weatherFx === 'scanlines') return;
@@ -404,9 +574,7 @@ export default function HomePage() {
     const densityMult = fxDensity / 50;
     const speedMult = fxSpeed / 50;
 
-    // ----------------------------------------------------
-    // REALISTIC MULTI-LAYER SNOW PARTICLE SYSTEM
-    // ----------------------------------------------------
+    // A. Snow Particles (Multi-Layer Parallax Simulation)
     interface Snowflake {
       x: number;
       y: number;
@@ -425,11 +593,11 @@ export default function HomePage() {
     for (let i = 0; i < totalFlakes; i++) {
       const rand = Math.random();
       if (rand < 0.65) {
-        // Deep background micro-dust (65%)
+        // Far background micro-dust
         snowFlakes.push({
           x: Math.random() * width,
           y: Math.random() * height,
-          radius: Math.random() * 0.7 + 0.35, // 0.35px to 1.05px
+          radius: Math.random() * 0.7 + 0.35,
           speedY: (Math.random() * 0.6 + 0.4) * speedMult,
           swing: Math.random() * 0.5 + 0.2,
           angle: Math.random() * Math.PI * 2,
@@ -437,12 +605,12 @@ export default function HomePage() {
           alpha: Math.random() * 0.3 + 0.15,
           layer: 'far',
         });
-      } else if (rand < 0.90) {
-        // Midground natural flakes (25%)
+      } else if (rand < 0.9) {
+        // Midground natural flakes
         snowFlakes.push({
           x: Math.random() * width,
           y: Math.random() * height,
-          radius: Math.random() * 1.0 + 1.1, // 1.1px to 2.1px
+          radius: Math.random() * 1.0 + 1.1,
           speedY: (Math.random() * 1.0 + 0.8) * speedMult,
           swing: Math.random() * 1.1 + 0.5,
           angle: Math.random() * Math.PI * 2,
@@ -451,11 +619,11 @@ export default function HomePage() {
           layer: 'mid',
         });
       } else {
-        // Foreground soft bokeh lens circles (10%)
+        // Foreground soft bokeh circles
         snowFlakes.push({
           x: Math.random() * width,
           y: Math.random() * height,
-          radius: Math.random() * 1.6 + 2.4, // 2.4px to 4.0px
+          radius: Math.random() * 1.6 + 2.4,
           speedY: (Math.random() * 1.6 + 1.2) * speedMult,
           swing: Math.random() * 1.8 + 0.8,
           angle: Math.random() * Math.PI * 2,
@@ -466,7 +634,7 @@ export default function HomePage() {
       }
     }
 
-    // Rain / Storm / Ember Particles
+    // B. Rain, Storm & Ember Particles
     interface GeneralParticle {
       x: number;
       y: number;
@@ -499,21 +667,15 @@ export default function HomePage() {
       ctx.clearRect(0, 0, width, height);
       timeTick += 0.01;
 
-      // 1. REALISTIC SNOW SIMULATION
+      // Render Snow
       if (weatherFx === 'snow') {
-        // Subtle shifting ambient breeze
         const wind = Math.sin(timeTick * 0.3) * 0.4 + 0.15;
-
         for (const f of snowFlakes) {
           f.angle += f.angularSpeed;
-          // Organic vertical fall velocity modulated by air resistance
           f.y += f.speedY * (1 + Math.sin(f.angle) * 0.15);
-          // Realistic horizontal tumble & drift
           f.x += Math.sin(f.angle) * f.swing + wind * (f.radius / 1.5);
 
-          // Render based on depth layer
           if (f.layer === 'bokeh') {
-            // Soft feathered camera lens blur
             const grad = ctx.createRadialGradient(f.x, f.y, 0, f.x, f.y, f.radius);
             grad.addColorStop(0, `rgba(245, 250, 255, ${f.alpha})`);
             grad.addColorStop(0.55, `rgba(240, 248, 255, ${f.alpha * 0.5})`);
@@ -523,14 +685,12 @@ export default function HomePage() {
             ctx.arc(f.x, f.y, f.radius, 0, Math.PI * 2);
             ctx.fill();
           } else {
-            // Crisp, delicate winter white specks
             ctx.fillStyle = `rgba(242, 247, 255, ${f.alpha})`;
             ctx.beginPath();
             ctx.arc(f.x, f.y, f.radius, 0, Math.PI * 2);
             ctx.fill();
           }
 
-          // Screen Wrap
           if (f.y > height + 10) {
             f.y = -10;
             f.x = Math.random() * (width + 40) - 20;
@@ -540,14 +700,13 @@ export default function HomePage() {
         }
       }
 
-      // 2. THUNDERSTORM / LIGHTNING FLASH (Smooth, no stripes)
+      // Render Thunderstorm Flash
       if (weatherFx === 'thunderstorm') {
         const now = Date.now();
         if (now > nextLightning) {
           lightningOpacity = 0.65;
           nextLightning = now + Math.random() * 8000 + 5000;
         }
-
         if (lightningOpacity > 0.01) {
           ctx.fillStyle = `rgba(220, 235, 255, ${lightningOpacity})`;
           ctx.fillRect(0, 0, width, height);
@@ -555,7 +714,7 @@ export default function HomePage() {
         }
       }
 
-      // 3. RAIN STREAKS
+      // Render Rain
       if (weatherFx === 'rain' || weatherFx === 'thunderstorm') {
         ctx.strokeStyle = 'rgba(255, 255, 255, 0.4)';
         ctx.lineWidth = 1.1;
@@ -577,7 +736,7 @@ export default function HomePage() {
         }
       }
 
-      // 4. EMBERS
+      // Render Embers
       if (weatherFx === 'embers') {
         for (const p of generalParticles) {
           ctx.beginPath();
@@ -607,40 +766,23 @@ export default function HomePage() {
     };
   }, [weatherFx, fxDensity, fxSpeed]);
 
-  // Polling
-  useEffect(() => {
-    if (!isAuthenticated) return;
-    const interval = setInterval(fetchNowPlaying, 1500);
-    return () => clearInterval(interval);
-  }, [isAuthenticated]);
+  // ============================================================================
+  // SECTION 6: SPOTIFY DATA LOADERS & AUTH HELPERS
+  // ============================================================================
 
-  useEffect(() => {
-    if (!isAuthenticated) return;
-    const interval = setInterval(loadQueue, 10000);
-    return () => clearInterval(interval);
-  }, [isAuthenticated]);
-
-  // Scrub Ticking
-  useEffect(() => {
-    if (!playback?.isPlaying) return;
-    const timer = setInterval(() => {
-      setPlayback((prev) => {
-        if (!prev || !prev.isPlaying) return prev;
-        const elapsed = Date.now() - prev.lastSyncTime;
-        const currentProgress = Math.min(prev.durationMs, prev.progressMs + elapsed);
-        return {
-          ...prev,
-          progressMs: currentProgress,
-          lastSyncTime: Date.now(),
-        };
-      });
-    }, 500);
-    return () => clearInterval(timer);
-  }, [playback?.isPlaying]);
-
-  useEffect(() => {
-    chatBottomRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages]);
+  async function resolveTargetDevice(): Promise<string | undefined> {
+    try {
+      const data = await spotifyFetch('/me/player/devices');
+      const devices = data?.devices || [];
+      const active = devices.find((d: { is_active: boolean }) => d.is_active);
+      const target = active || devices[0];
+      if (target?.id) {
+        activeDeviceId.current = target.id;
+        return target.id;
+      }
+    } catch {}
+    return activeDeviceId.current || undefined;
+  }
 
   async function loadDevices() {
     try {
@@ -742,6 +884,7 @@ export default function HomePage() {
             const drift = Math.abs(prev.progressMs - serverProgress);
             return {
               ...prev,
+              id: data.item.id,
               isPlaying,
               progressMs: drift > 1500 ? serverProgress : prev.progressMs,
               lastSyncTime: Date.now(),
@@ -750,6 +893,7 @@ export default function HomePage() {
           }
 
           const fresh = {
+            id: data.item.id,
             name: data.item.name || 'Unknown Track',
             artist: artistName,
             album: albumName,
@@ -771,7 +915,117 @@ export default function HomePage() {
     }
   }
 
-  // Copilot Direct Executor
+  // ============================================================================
+  // SECTION 7: SPOTIFY PLAYBACK ACTIONS (PLAY, NEXT, SEEK, QUEUE)
+  // ============================================================================
+
+  async function togglePlay() {
+    if (!playback) return;
+    const targetState = !playback.isPlaying;
+    const deviceId = await resolveTargetDevice();
+    const devParam = deviceId ? `?device_id=${deviceId}` : '';
+    isActionPending.current = true;
+    setPlayback((prev) => (prev ? { ...prev, isPlaying: targetState, lastSyncTime: Date.now() } : null));
+
+    try {
+      await spotifyFetch(`/me/player/${targetState ? 'play' : 'pause'}${devParam}`, { method: 'PUT' });
+    } finally {
+      setTimeout(() => {
+        isActionPending.current = false;
+        fetchNowPlaying();
+      }, 400);
+    }
+  }
+
+  async function handleNext() {
+    isActionPending.current = true;
+    const deviceId = await resolveTargetDevice();
+    const devParam = deviceId ? `?device_id=${deviceId}` : '';
+    try {
+      await spotifyFetch(`/me/player/next${devParam}`, { method: 'POST' });
+    } finally {
+      setTimeout(() => {
+        isActionPending.current = false;
+        fetchNowPlaying();
+        loadQueue();
+      }, 500);
+    }
+  }
+
+  async function handlePrev() {
+    isActionPending.current = true;
+    const devParam = activeDeviceId.current ? `?device_id=${activeDeviceId.current}` : '';
+    try {
+      await spotifyFetch(`/me/player/previous${devParam}`, { method: 'POST' });
+    } finally {
+      setTimeout(() => {
+        isActionPending.current = false;
+        fetchNowPlaying();
+      }, 500);
+    }
+  }
+
+  async function handleSeek(e: React.MouseEvent<HTMLDivElement>) {
+    if (!playback) return;
+    const rect = e.currentTarget.getBoundingClientRect();
+    const ratio = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+    const newPosMs = Math.floor(ratio * playback.durationMs);
+    const deviceId = await resolveTargetDevice();
+    const devParam = deviceId ? `?device_id=${deviceId}` : '';
+
+    isActionPending.current = true;
+    setPlayback((prev) => (prev ? { ...prev, progressMs: newPosMs, lastSyncTime: Date.now() } : null));
+
+    try {
+      await spotifyFetch(`/me/player/seek?position_ms=${newPosMs}${devParam}`, { method: 'PUT' });
+    } finally {
+      setTimeout(() => {
+        isActionPending.current = false;
+        fetchNowPlaying();
+      }, 500);
+    }
+  }
+
+  async function handlePlayTrack(trackUri: string) {
+    if (!trackUri) return;
+    const deviceId = await resolveTargetDevice();
+    await SpotifyAPI.playUri(undefined, [trackUri], deviceId);
+    setTimeout(() => {
+      fetchNowPlaying();
+      loadQueue();
+    }, 600);
+  }
+
+  async function handleAddToQueue(track: TrackItem) {
+    if (!track?.uri) return;
+    await SpotifyAPI.addToQueue(track.uri);
+    setQueue((prev) => [track, ...prev]);
+    setTimeout(loadQueue, 800);
+  }
+
+  async function handlePlayPlaylist(playlistUri: string) {
+    if (!playlistUri) return;
+    const deviceId = await resolveTargetDevice();
+    await SpotifyAPI.playUri(playlistUri, undefined, deviceId);
+    setTimeout(() => {
+      fetchNowPlaying();
+      loadQueue();
+    }, 800);
+  }
+
+  function handleLogout() {
+    localStorage.removeItem('spotify_access_token');
+    localStorage.removeItem('spotify_refresh_token');
+    localStorage.removeItem('spotify_token_expires');
+    localStorage.removeItem('trackdeck_cached_track');
+    setIsAuthenticated(false);
+    setShowSpotifyModal(true);
+  }
+
+  // ============================================================================
+  // SECTION 8: AI COPILOT COMMAND EXECUTION & CHAT
+  // ============================================================================
+
   async function executeCopilotCommand(copilot: CopilotResponse) {
     const { command, query } = copilot;
     if (!command) return;
@@ -834,116 +1088,6 @@ export default function HomePage() {
     }
   }
 
-  async function togglePlay() {
-    if (!playback) return;
-    const targetState = !playback.isPlaying;
-    const devParam = activeDeviceId.current ? `?device_id=${activeDeviceId.current}` : '';
-    isActionPending.current = true;
-    setPlayback((prev) => (prev ? { ...prev, isPlaying: targetState, lastSyncTime: Date.now() } : null));
-
-    try {
-      await spotifyFetch(`/me/player/${targetState ? 'play' : 'pause'}${devParam}`, { method: 'PUT' });
-    } finally {
-      setTimeout(() => {
-        isActionPending.current = false;
-        fetchNowPlaying();
-      }, 400);
-    }
-  }
-
-  async function handleNext() {
-    isActionPending.current = true;
-    const devParam = activeDeviceId.current ? `?device_id=${activeDeviceId.current}` : '';
-    try {
-      await spotifyFetch(`/me/player/next${devParam}`, { method: 'POST' });
-    } finally {
-      setTimeout(() => {
-        isActionPending.current = false;
-        fetchNowPlaying();
-        loadQueue();
-      }, 500);
-    }
-  }
-
-  async function handlePrev() {
-    isActionPending.current = true;
-    const devParam = activeDeviceId.current ? `?device_id=${activeDeviceId.current}` : '';
-    try {
-      await spotifyFetch(`/me/player/previous${devParam}`, { method: 'POST' });
-    } finally {
-      setTimeout(() => {
-        isActionPending.current = false;
-        fetchNowPlaying();
-        loadQueue();
-      }, 500);
-    }
-  }
-
-  async function handleSeek(e: React.MouseEvent<HTMLDivElement>) {
-    if (!playback) return;
-    const rect = e.currentTarget.getBoundingClientRect();
-    const ratio = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
-    const newPosMs = Math.floor(ratio * playback.durationMs);
-    const devParam = activeDeviceId.current ? `?device_id=${activeDeviceId.current}` : '';
-
-    isActionPending.current = true;
-    setPlayback((prev) => (prev ? { ...prev, progressMs: newPosMs, lastSyncTime: Date.now() } : null));
-
-    try {
-      await spotifyFetch(`/me/player/seek?position_ms=${newPosMs}${devParam}`, { method: 'PUT' });
-    } finally {
-      setTimeout(() => {
-        isActionPending.current = false;
-        fetchNowPlaying();
-      }, 500);
-    }
-  }
-
-  async function handlePlayTrack(trackUri: string) {
-    if (!trackUri) return;
-    await SpotifyAPI.playUri(undefined, [trackUri], activeDeviceId.current || undefined);
-    setTimeout(() => {
-      fetchNowPlaying();
-      loadQueue();
-    }, 600);
-  }
-
-  async function handleAddToQueue(track: TrackItem) {
-    if (!track?.uri) return;
-    await SpotifyAPI.addToQueue(track.uri);
-    setQueue((prev) => [track, ...prev]);
-    setTimeout(loadQueue, 800);
-  }
-
-  async function handlePlayPlaylist(playlistUri: string) {
-    if (!playlistUri) return;
-    await SpotifyAPI.playUri(playlistUri, undefined, activeDeviceId.current || undefined);
-    setTimeout(() => {
-      fetchNowPlaying();
-      loadQueue();
-    }, 800);
-  }
-
-  function handleLogout() {
-    localStorage.removeItem('spotify_access_token');
-    localStorage.removeItem('spotify_refresh_token');
-    localStorage.removeItem('spotify_token_expires');
-    localStorage.removeItem('trackdeck_cached_track');
-    setIsAuthenticated(false);
-    setShowSpotifyModal(true);
-  }
-
-  function saveGeminiKey() {
-    if (!keyInput.trim()) return;
-    localStorage.setItem('gemini_api_key', keyInput.trim());
-    setGeminiKey(keyInput.trim());
-    setShowSettingsModal(false);
-    setMessages((prev) => [
-      ...prev,
-      { role: 'model', text: '✨ Copilot is connected and ready.' },
-    ]);
-  }
-
   async function sendToGemini(textToSend: string) {
     if (!textToSend.trim() || isAiLoading) return;
     if (!geminiKey) {
@@ -982,6 +1126,114 @@ export default function HomePage() {
     sendToGemini(msg);
   }
 
+  function saveGeminiKey() {
+    if (!keyInput.trim()) return;
+    localStorage.setItem('gemini_api_key', keyInput.trim());
+    setGeminiKey(keyInput.trim());
+    setShowSettingsModal(false);
+    setMessages((prev) => [
+      ...prev,
+      { role: 'model', text: '✨ Copilot is connected and ready.' },
+    ]);
+  }
+
+  // ============================================================================
+  // SECTION 9: CHAMELEON REALITY & WEATHER FX CONTROLLERS
+  // ============================================================================
+
+  async function applyChameleonReality() {
+    setIsDetectingWeather(true);
+    const report = await detectLocalWeather();
+    setLocalWeather(report);
+
+    setBgMode('gallery');
+    setSelectedGalleryUrl(report.recommendedBgUrl);
+    setWeatherFx(report.effect);
+    setColorTheme(report.isDay ? 'light' : 'dark');
+    setBgDim(report.isDay ? 30 : 55);
+    setBgBlur(8);
+
+    localStorage.setItem('trackdeck_bg_mode', 'gallery');
+    localStorage.setItem('trackdeck_bg_gallery', report.recommendedBgUrl);
+    localStorage.setItem('trackdeck_weather_fx', report.effect);
+    localStorage.setItem('trackdeck_color_theme', report.isDay ? 'light' : 'dark');
+    localStorage.setItem('trackdeck_bg_dim', String(report.isDay ? 30 : 55));
+    setIsDetectingWeather(false);
+  }
+
+  function applyVibePreset(preset: typeof VIBE_PRESETS[0]) {
+    setBgMode('gallery');
+    setSelectedGalleryUrl(preset.url);
+    setWeatherFx(preset.effect);
+    setColorTheme(preset.color);
+    setAmbientSound(preset.sound);
+    setBgBlur(preset.blur);
+    setBgDim(preset.dim);
+
+    localStorage.setItem('trackdeck_bg_mode', 'gallery');
+    localStorage.setItem('trackdeck_bg_gallery', preset.url);
+    localStorage.setItem('trackdeck_weather_fx', preset.effect);
+    localStorage.setItem('trackdeck_color_theme', preset.color);
+    localStorage.setItem('trackdeck_bg_blur', String(preset.blur));
+    localStorage.setItem('trackdeck_bg_dim', String(preset.dim));
+  }
+
+  function changeLayout(newLayout: LayoutPreset) {
+    setLayout(newLayout);
+    localStorage.setItem('trackdeck_layout', newLayout);
+  }
+
+  function changeColorTheme(newTheme: ColorPreset) {
+    setColorTheme(newTheme);
+    localStorage.setItem('trackdeck_color_theme', newTheme);
+  }
+
+  function changeWeatherFx(fx: WeatherEffect) {
+    setWeatherFx(fx);
+    localStorage.setItem('trackdeck_weather_fx', fx);
+  }
+
+  function updateParam(key: string, val: string | number) {
+    localStorage.setItem(key, String(val));
+  }
+
+  function handleImageUpload(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const img = new Image();
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        const maxDim = 1280;
+        let w = img.width;
+        let h = img.height;
+        if (w > maxDim || h > maxDim) {
+          if (w > h) {
+            h = Math.round((h * maxDim) / w);
+            w = maxDim;
+          } else {
+            w = Math.round((w * maxDim) / h);
+            h = maxDim;
+          }
+        }
+        canvas.width = w;
+        canvas.height = h;
+        const ctx = canvas.getContext('2d');
+        ctx?.drawImage(img, 0, 0, w, h);
+        const compressed = canvas.toDataURL('image/jpeg', 0.8);
+
+        setBgCustomUrl(compressed);
+        setBgMode('custom');
+        localStorage.setItem('trackdeck_bg_custom', compressed);
+        localStorage.setItem('trackdeck_bg_mode', 'custom');
+      };
+      img.src = event.target?.result as string;
+    };
+    reader.readAsDataURL(file);
+  }
+
   function formatTime(ms: number) {
     const totalSecs = Math.floor(ms / 1000);
     const mins = Math.floor(totalSecs / 60);
@@ -993,97 +1245,7 @@ export default function HomePage() {
     ? Math.min(100, Math.max(0, (playback.progressMs / playback.durationMs) * 100))
     : 0;
 
-  // Theme styling definitions
-  const themeClasses: Record<
-    ColorPreset,
-    {
-      root: string;
-      topBar: string;
-      panel: string;
-      border: string;
-      accentBtn: string;
-      accentText: string;
-      scrubBg: string;
-      scrubFill: string;
-      modal: string;
-      input: string;
-    }
-  > = {
-    dark: {
-      root: 'bg-[#07080b] text-zinc-100',
-      topBar: 'bg-[#040507]/90 border-white/[0.05] text-white',
-      panel: 'bg-black/40 text-zinc-100 border-white/[0.05]',
-      border: 'border-white/[0.05]',
-      accentBtn: 'bg-emerald-500 hover:bg-emerald-400 text-black shadow-emerald-500/20',
-      accentText: 'text-emerald-500',
-      scrubBg: 'bg-white/[0.08] hover:bg-white/[0.14]',
-      scrubFill: 'bg-emerald-500',
-      modal: 'bg-[#0e1017] border-white/10 text-white',
-      input: 'bg-white/[0.03] border-white/10 text-white placeholder:text-zinc-500 focus:border-emerald-500/60',
-    },
-    light: {
-      root: 'bg-[#f4f5f8] text-zinc-900',
-      topBar: 'bg-white/80 border-zinc-200/80 text-zinc-900 shadow-sm',
-      panel: 'bg-white/70 text-zinc-900 border-zinc-200/80 shadow-sm',
-      border: 'border-zinc-200/80',
-      accentBtn: 'bg-emerald-500 hover:bg-emerald-400 text-black shadow-emerald-500/10',
-      accentText: 'text-emerald-600',
-      scrubBg: 'bg-zinc-200 hover:bg-zinc-300',
-      scrubFill: 'bg-emerald-500',
-      modal: 'bg-white border-zinc-200 text-zinc-900',
-      input: 'bg-zinc-50 border-zinc-200 text-zinc-900 placeholder:text-zinc-400 focus:border-emerald-500',
-    },
-    neon: {
-      root: 'bg-[#0a0518] text-pink-50',
-      topBar: 'bg-[#070212]/90 border-pink-500/20 text-white',
-      panel: 'bg-[#120826]/60 text-pink-50 border-pink-500/20 shadow-pink-950/20',
-      border: 'border-pink-500/20',
-      accentBtn: 'bg-gradient-to-r from-pink-500 to-rose-500 hover:from-pink-400 hover:to-rose-400 text-white shadow-pink-500/30',
-      accentText: 'text-cyan-400',
-      scrubBg: 'bg-pink-950/40 hover:bg-pink-900/50',
-      scrubFill: 'bg-gradient-to-r from-cyan-400 to-pink-500',
-      modal: 'bg-[#120826] border-pink-500/30 text-white',
-      input: 'bg-pink-950/20 border-pink-500/30 text-white placeholder:text-pink-400/50 focus:border-cyan-400',
-    },
-    aqua: {
-      root: 'bg-[#040d1a] text-cyan-50',
-      topBar: 'bg-[#02070e]/90 border-cyan-500/20 text-white',
-      panel: 'bg-[#081b33]/60 text-cyan-50 border-cyan-500/20 shadow-cyan-950/20',
-      border: 'border-cyan-500/20',
-      accentBtn: 'bg-gradient-to-r from-cyan-400 to-teal-400 hover:from-cyan-300 hover:to-teal-300 text-black shadow-cyan-500/30',
-      accentText: 'text-cyan-400',
-      scrubBg: 'bg-cyan-950/40 hover:bg-cyan-900/50',
-      scrubFill: 'bg-gradient-to-r from-cyan-400 to-teal-300',
-      modal: 'bg-[#081b33] border-cyan-500/30 text-white',
-      input: 'bg-cyan-950/20 border-cyan-500/30 text-white placeholder:text-cyan-400/50 focus:border-teal-400',
-    },
-    amber: {
-      root: 'bg-[#100a06] text-amber-50',
-      topBar: 'bg-[#090503]/90 border-amber-500/20 text-white',
-      panel: 'bg-[#1a0f07]/60 text-amber-50 border-amber-500/20 shadow-amber-950/20',
-      border: 'border-amber-500/20',
-      accentBtn: 'bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 text-black shadow-amber-500/30',
-      accentText: 'text-amber-400',
-      scrubBg: 'bg-amber-950/40 hover:bg-amber-900/50',
-      scrubFill: 'bg-gradient-to-r from-amber-400 to-orange-400',
-      modal: 'bg-[#1a0f07] border-amber-500/30 text-white',
-      input: 'bg-amber-950/20 border-amber-500/30 text-white placeholder:text-amber-400/50 focus:border-amber-400',
-    },
-    oled: {
-      root: 'bg-[#000000] text-white',
-      topBar: 'bg-[#000000] border-zinc-800 text-white',
-      panel: 'bg-[#000000] text-white border-zinc-850',
-      border: 'border-zinc-850',
-      accentBtn: 'bg-white hover:bg-zinc-200 text-black shadow-white/10',
-      accentText: 'text-zinc-400',
-      scrubBg: 'bg-zinc-900 hover:bg-zinc-800',
-      scrubFill: 'bg-white',
-      modal: 'bg-[#000000] border-zinc-800 text-white',
-      input: 'bg-zinc-950 border-zinc-800 text-white placeholder:text-zinc-600 focus:border-white',
-    },
-  };
-
-  const theme = themeClasses[colorTheme];
+  const theme = THEME_CLASSES[colorTheme];
 
   const activeBgImage =
     bgMode === 'custom' && bgCustomUrl
@@ -1092,16 +1254,26 @@ export default function HomePage() {
       ? selectedGalleryUrl
       : playback?.albumArt || '';
 
+  // ============================================================================
+  // SECTION 10: MAIN JSX LAYOUT
+  // ============================================================================
   return (
     <div
       className={`h-screen w-screen overflow-hidden flex flex-col font-sans select-none transition-colors duration-500 ${theme.root}`}
     >
-      {/* ======================================================== */}
-      {/* 0. DYNAMIC BACKGROUND & REAL-TIME WEATHER CANVAS         */}
-      {/* ======================================================== */}
+      {/* Background Audio Synthesizer */}
+      <audio
+        ref={ambientAudioRef}
+        src={AMBIENT_SOUND_URLS[ambientSound]}
+        loop
+        preload="auto"
+      />
+
+      {/* ---------------------------------------------------------------------- */}
+      {/* 10.A: BACKGROUND WALLPAPER & CANVAS SHADERS                            */}
+      {/* ---------------------------------------------------------------------- */}
       {activeBgImage && (
         <div className="fixed inset-0 pointer-events-none z-0 overflow-hidden">
-          {/* Background Wallpaper */}
           <div
             className="absolute inset-0 transition-all duration-700"
             style={{
@@ -1114,7 +1286,6 @@ export default function HomePage() {
             }}
           />
 
-          {/* Darkness Dimming Tint Overlay */}
           <div
             className="absolute inset-0 transition-opacity duration-500"
             style={{
@@ -1123,10 +1294,8 @@ export default function HomePage() {
             }}
           />
 
-          {/* REALISTIC 2D CANVAS SHADER (ZERO MOIRÉ LINES) */}
           <canvas ref={canvasRef} className="absolute inset-0 pointer-events-none" />
 
-          {/* Subtle CRT Scanline Overlay */}
           {weatherFx === 'scanlines' && (
             <div
               className="absolute inset-0 pointer-events-none opacity-20"
@@ -1139,14 +1308,14 @@ export default function HomePage() {
         </div>
       )}
 
-      {/* ======================================================== */}
-      {/* 1. TOP NAVBAR                                            */}
-      {/* ======================================================== */}
+      {/* ---------------------------------------------------------------------- */}
+      {/* 10.B: TOP NAVBAR                                                       */}
+      {/* ---------------------------------------------------------------------- */}
       <header
         className={`relative z-30 h-12 border-b px-5 flex items-center justify-between shrink-0 backdrop-blur-2xl transition-colors duration-300 ${theme.topBar}`}
       >
+        {/* Left Side: AI Status & Device Selector */}
         <div className="flex items-center gap-2">
-          {/* AI Status */}
           <button
             onClick={() => setShowSettingsModal(true)}
             className={`text-[11px] font-medium px-3 py-1 rounded-full border transition-all flex items-center gap-1.5 ${
@@ -1159,7 +1328,6 @@ export default function HomePage() {
             <span>{geminiKey ? 'Copilot Active' : 'Connect AI'}</span>
           </button>
 
-          {/* Device Selector Pill */}
           <button
             onClick={() => {
               loadDevices();
@@ -1175,24 +1343,29 @@ export default function HomePage() {
           </button>
         </div>
 
-        {/* Center: Brand */}
-        <div className="flex items-center gap-2">
+        {/* Center: Brand & Real-Time Weather Badge */}
+        <div className="flex items-center gap-2.5">
           <Disc3 className="w-4 h-4 text-emerald-500 animate-[spin_10s_linear_infinite]" />
           <h1 className="font-bold text-xs tracking-widest uppercase font-mono">TrackDeck</h1>
+
+          {localWeather && (
+            <span className="hidden md:inline-flex items-center gap-1 text-[10px] font-mono opacity-60 bg-white/5 border border-white/10 px-2 py-0.5 rounded-full">
+              <Compass className="w-2.5 h-2.5 text-emerald-400" />
+              {localWeather.description}
+            </span>
+          )}
         </div>
 
-        {/* Right Actions */}
+        {/* Right Side: Atmosphere, Settings, Logout */}
         <div className="flex items-center gap-1.5">
-          {/* Atmosphere Studio Button */}
           <button
             onClick={() => setShowAtmosphereModal(true)}
-            title="Atmosphere & Deck Customizer"
+            title="Atmosphere Studio & FX"
             className="p-1.5 rounded-lg hover:bg-white/10 transition-colors flex items-center gap-1 text-xs"
           >
             <Palette className="w-4 h-4 text-emerald-500" />
           </button>
 
-          {/* Settings Gear */}
           <button
             onClick={() => setShowSettingsModal(true)}
             title="Settings"
@@ -1201,7 +1374,6 @@ export default function HomePage() {
             <Settings className="w-4 h-4 opacity-70 hover:opacity-100" />
           </button>
 
-          {/* Account Logout */}
           {isAuthenticated && (
             <button
               onClick={handleLogout}
@@ -1214,12 +1386,14 @@ export default function HomePage() {
         </div>
       </header>
 
-      {/* ======================================================== */}
-      {/* 2. MAIN WORKSPACE (STUDIO vs CINEMA)                     */}
-      {/* ======================================================== */}
+      {/* ---------------------------------------------------------------------- */}
+      {/* 10.C: THREE-COLUMN WORKSPACE (Studio vs Cinema)                        */}
+      {/* ---------------------------------------------------------------------- */}
       <div className="relative z-10 flex-1 flex overflow-hidden">
         
-        {/* LEFT WING: PLAYLISTS (Studio only) */}
+        {/* ==================================================================== */}
+        {/* LEFT COLUMN: PLAYLISTS & TRACKLIST INSPECTOR                         */}
+        {/* ==================================================================== */}
         {layout === 'studio' && (
           <aside
             className={`h-full w-64 border-r backdrop-blur-2xl flex flex-col shrink-0 overflow-hidden transition-all duration-300 ${theme.panel}`}
@@ -1242,6 +1416,7 @@ export default function HomePage() {
 
             <div className="flex-1 overflow-y-auto p-2 space-y-1.5 no-scrollbar">
               {selectedPlaylist ? (
+                /* Inspector View */
                 <div className="space-y-3">
                   <div className="text-center p-2">
                     <img
@@ -1290,6 +1465,7 @@ export default function HomePage() {
                   </div>
                 </div>
               ) : (
+                /* List View */
                 playlists.map((pl) => (
                   <div
                     key={pl.id}
@@ -1314,113 +1490,203 @@ export default function HomePage() {
           </aside>
         )}
 
-        {/* CENTER STAGE */}
+        {/* ==================================================================== */}
+        {/* CENTER COLUMN: PLAYER DECK + SYNCED LYRICS + AI CHAT                 */}
+        {/* ==================================================================== */}
         <main
           className={`flex-1 flex flex-col justify-between overflow-hidden transition-all duration-500 ${
             layout === 'cinema' ? 'px-8 py-6 max-w-4xl mx-auto' : 'px-6 py-4'
           }`}
         >
-          {/* UPPER DECK */}
-          <div className="flex-1 flex flex-col items-center justify-center min-h-0">
-            <div
-              className={`flex flex-col items-center text-center transition-all duration-500 ${
-                layout === 'cinema' ? 'w-full max-w-lg' : 'w-full max-w-md'
-              }`}
-            >
-              {/* Album Art */}
-              <div
-                className={`relative aspect-square rounded-3xl overflow-hidden border shadow-2xl mb-4 group flex items-center justify-center transition-all duration-500 ${
-                  layout === 'cinema'
-                    ? 'w-64 md:w-80 shadow-[0_25px_60px_rgba(0,0,0,0.9)]'
-                    : 'w-56 md:w-64'
-                } ${theme.panel}`}
+          {/* Top Half: Living Deck vs Apple Music-style Synced Lyrics */}
+          <div className="flex-1 flex flex-col items-center justify-center min-h-0 relative">
+            
+            {/* View Mode Toggle: [ 💿 Album ] vs [ 🎤 Lyrics ] */}
+            <div className="absolute top-2 right-4 z-20 flex items-center gap-1 bg-black/30 border border-white/10 rounded-xl p-1">
+              <button
+                onClick={() => setCenterMode('deck')}
+                className={`p-1.5 rounded-lg text-xs transition-colors ${
+                  centerMode === 'deck' ? theme.accentBtn : 'opacity-60 hover:opacity-100'
+                }`}
+                title="Album View"
               >
-                {playback?.albumArt ? (
-                  <img
-                    src={playback.albumArt}
-                    alt={playback.name}
-                    className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-105"
-                  />
-                ) : (
-                  <div className="flex flex-col items-center gap-2 opacity-60 p-4">
-                    <Music2 className="w-12 h-12 stroke-[1.2]" />
-                    <p className="text-xs font-semibold">Spotify is Idle</p>
-                    {devices.length > 0 && (
-                      <button
-                        onClick={() => handleTransferDevice(devices[0].id)}
-                        className={`mt-2 px-3 py-1 text-[11px] font-bold rounded-full transition-all ${theme.accentBtn}`}
-                      >
-                        Wake Up {devices[0].name}
-                      </button>
-                    )}
+                <Disc3 className="w-3.5 h-3.5" />
+              </button>
+              <button
+                onClick={() => setCenterMode('lyrics')}
+                className={`p-1.5 rounded-lg text-xs transition-colors ${
+                  centerMode === 'lyrics' ? theme.accentBtn : 'opacity-60 hover:opacity-100'
+                }`}
+                title="Apple Music Karaoke Synced Lyrics"
+              >
+                <Mic2 className="w-3.5 h-3.5" />
+              </button>
+            </div>
+
+            {/* View A: The Living Deck */}
+            {centerMode === 'deck' ? (
+              <div
+                className={`flex flex-col items-center text-center transition-all duration-500 ${
+                  layout === 'cinema' ? 'w-full max-w-lg' : 'w-full max-w-md'
+                }`}
+              >
+                {/* Album Art Showcase */}
+                <div
+                  className={`relative aspect-square rounded-3xl overflow-hidden border shadow-2xl mb-4 group flex items-center justify-center transition-all duration-500 ${
+                    layout === 'cinema'
+                      ? 'w-64 md:w-80 shadow-[0_25px_60px_rgba(0,0,0,0.9)]'
+                      : 'w-56 md:w-64'
+                  } ${theme.panel}`}
+                >
+                  {playback?.albumArt ? (
+                    <img
+                      src={playback.albumArt}
+                      alt={playback.name}
+                      className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-105"
+                    />
+                  ) : (
+                    <div className="flex flex-col items-center gap-2 opacity-60 p-4">
+                      <Music2 className="w-12 h-12 stroke-[1.2]" />
+                      <p className="text-xs font-semibold">Spotify is Idle</p>
+                      {devices.length > 0 && (
+                        <button
+                          onClick={() => handleTransferDevice(devices[0].id)}
+                          className={`mt-2 px-3 py-1 text-[11px] font-bold rounded-full transition-all ${theme.accentBtn}`}
+                        >
+                          Wake Up {devices[0].name}
+                        </button>
+                      )}
+                    </div>
+                  )}
+                </div>
+
+                {/* Track Title & Artist */}
+                <div className="space-y-0.5 px-4 mb-2 w-full">
+                  <h2
+                    className={`font-bold truncate tracking-tight transition-all ${
+                      layout === 'cinema' ? 'text-2xl' : 'text-lg'
+                    }`}
+                  >
+                    {playback?.name || 'Awaiting Track...'}
+                  </h2>
+                  <p className="text-xs font-medium opacity-60 truncate">
+                    {playback?.artist || 'Ready to spin'}
+                  </p>
+                </div>
+
+                {/* Sonic DNA Badge (BPM, Key, Energy %) */}
+                {sonicDna && (
+                  <div className="flex items-center gap-2 text-[10px] font-mono opacity-70 bg-white/5 border border-white/10 px-2.5 py-1 rounded-full mb-3">
+                    <Activity className="w-3 h-3 text-emerald-400" />
+                    <span>{sonicDna.bpm} BPM</span>
+                    <span>•</span>
+                    <span>{sonicDna.key}</span>
+                    <span>•</span>
+                    <span>Energy {sonicDna.energy}%</span>
                   </div>
                 )}
-              </div>
 
-              {/* Title & Artist */}
-              <div className="space-y-0.5 px-4 mb-3 w-full">
-                <h2
-                  className={`font-bold truncate tracking-tight transition-all ${
-                    layout === 'cinema' ? 'text-2xl' : 'text-lg'
-                  }`}
-                >
-                  {playback?.name || 'Awaiting Track...'}
-                </h2>
-                <p className="text-xs font-medium opacity-60 truncate">
-                  {playback?.artist || 'Ready to spin'}
-                </p>
-              </div>
-
-              {/* Timeline Scrub Bar */}
-              <div className="w-full space-y-1 mb-4">
-                <div
-                  onClick={handleSeek}
-                  className={`w-full h-1.5 rounded-full overflow-hidden cursor-pointer transition-colors relative ${theme.scrubBg}`}
-                  title="Click to jump"
-                >
+                {/* Clickable Scrub Bar */}
+                <div className="w-full space-y-1 mb-4">
                   <div
-                    className={`h-full rounded-full transition-[width] duration-300 ease-linear ${theme.scrubFill}`}
-                    style={{ width: `${progressPercent}%` }}
-                  />
+                    onClick={handleSeek}
+                    className={`w-full h-1.5 rounded-full overflow-hidden cursor-pointer transition-colors relative ${theme.scrubBg}`}
+                    title="Click to jump"
+                  >
+                    <div
+                      className={`h-full rounded-full transition-[width] duration-300 ease-linear ${theme.scrubFill}`}
+                      style={{ width: `${progressPercent}%` }}
+                    />
+                  </div>
+                  <div className="flex justify-between text-[10px] font-mono opacity-50">
+                    <span>{playback ? formatTime(playback.progressMs) : '0:00'}</span>
+                    <span>{playback ? formatTime(playback.durationMs) : '0:00'}</span>
+                  </div>
                 </div>
-                <div className="flex justify-between text-[10px] font-mono opacity-50">
-                  <span>{playback ? formatTime(playback.progressMs) : '0:00'}</span>
-                  <span>{playback ? formatTime(playback.durationMs) : '0:00'}</span>
-                </div>
-              </div>
 
-              {/* Media Controls */}
-              <div className="flex items-center justify-center gap-8">
-                <button
-                  onClick={handlePrev}
-                  disabled={!playback}
-                  className="p-2 opacity-70 hover:opacity-100 active:scale-90 disabled:opacity-30 transition-all"
+                {/* Media Controls */}
+                <div className="flex items-center justify-center gap-8">
+                  <button
+                    onClick={handlePrev}
+                    disabled={!playback}
+                    className="p-2 opacity-70 hover:opacity-100 active:scale-90 disabled:opacity-30 transition-all"
+                  >
+                    <SkipBack className="w-5 h-5" />
+                  </button>
+                  <button
+                    onClick={togglePlay}
+                    disabled={!playback}
+                    className={`p-4 rounded-2xl shadow-xl transition-all hover:scale-105 active:scale-95 disabled:opacity-30 ${theme.accentBtn}`}
+                  >
+                    {playback?.isPlaying ? (
+                      <Pause className="w-6 h-6 fill-current" />
+                    ) : (
+                      <Play className="w-6 h-6 fill-current ml-0.5" />
+                    )}
+                  </button>
+                  <button
+                    onClick={handleNext}
+                    disabled={!playback}
+                    className="p-2 opacity-70 hover:opacity-100 active:scale-90 disabled:opacity-30 transition-all"
+                  >
+                    <SkipForward className="w-5 h-5" />
+                  </button>
+                </div>
+              </div>
+            ) : (
+              /* View B: Synced Karaoke Lyrics */
+              <div className="w-full max-w-xl h-full flex flex-col items-center justify-center p-4 overflow-hidden">
+                <div
+                  ref={lyricsContainerRef}
+                  className="w-full h-[320px] overflow-y-auto space-y-5 text-center no-scrollbar pr-2 py-16"
                 >
-                  <SkipBack className="w-5 h-5" />
-                </button>
-                <button
-                  onClick={togglePlay}
-                  disabled={!playback}
-                  className={`p-4 rounded-2xl shadow-xl transition-all hover:scale-105 active:scale-95 disabled:opacity-30 ${theme.accentBtn}`}
-                >
-                  {playback?.isPlaying ? (
-                    <Pause className="w-6 h-6 fill-current" />
+                  {lyrics === null ? (
+                    <div className="h-full flex flex-col items-center justify-center opacity-50 space-y-2">
+                      <Mic2 className="w-8 h-8 animate-pulse text-emerald-400" />
+                      <p className="text-xs">Searching synced karaoke lyrics...</p>
+                    </div>
+                  ) : lyrics.length === 0 ? (
+                    <p className="opacity-50 text-xs">No synced lyrics available for this song.</p>
                   ) : (
-                    <Play className="w-6 h-6 fill-current ml-0.5" />
+                    lyrics.map((line, idx) => {
+                      const isActive = idx === currentLyricIdx;
+                      const isPast = idx < currentLyricIdx;
+
+                      return (
+                        <p
+                          key={idx}
+                          id={`lyric-line-${idx}`}
+                          onClick={() => {
+                            if (!playback) return;
+                            const devParam = activeDeviceId.current ? `?device_id=${activeDeviceId.current}` : '';
+                            spotifyFetch(`/me/player/seek?position_ms=${line.timeMs}${devParam}`, { method: 'PUT' });
+                          }}
+                          className={`cursor-pointer transition-all duration-300 font-extrabold tracking-tight ${
+                            isActive
+                              ? `text-xl md:text-2xl scale-105 ${theme.accentText} drop-shadow-[0_0_20px_rgba(16,185,129,0.35)]`
+                              : isPast
+                              ? 'text-sm md:text-base opacity-30 hover:opacity-50 blur-[0.4px]'
+                              : 'text-sm md:text-base opacity-40 hover:opacity-70 blur-[0.4px]'
+                          }`}
+                        >
+                          {line.text}
+                        </p>
+                      );
+                    })
                   )}
-                </button>
+                </div>
+
                 <button
-                  onClick={handleNext}
-                  disabled={!playback}
-                  className="p-2 opacity-70 hover:opacity-100 active:scale-90 disabled:opacity-30 transition-all"
+                  onClick={() => setCenterMode('deck')}
+                  className="mt-2 text-xs font-semibold opacity-60 hover:opacity-100 flex items-center gap-1.5 transition-opacity"
                 >
-                  <SkipForward className="w-5 h-5" />
+                  <ArrowLeft className="w-3.5 h-3.5" /> Return to Deck
                 </button>
               </div>
-            </div>
+            )}
           </div>
 
-          {/* LOWER DECK: CHAT */}
+          {/* Bottom Half: Wide AI Copilot Chat Bar */}
           <div
             className={`w-full mx-auto border rounded-2xl backdrop-blur-2xl flex flex-col justify-between p-3 shrink-0 shadow-lg h-[20vh] max-w-3xl transition-all duration-300 ${theme.panel}`}
           >
@@ -1466,7 +1732,9 @@ export default function HomePage() {
           </div>
         </main>
 
-        {/* RIGHT WING: QUEUE (Studio only) */}
+        {/* ==================================================================== */}
+        {/* RIGHT COLUMN: QUEUE                                                  */}
+        {/* ==================================================================== */}
         {layout === 'studio' && (
           <aside
             className={`h-full w-64 border-l backdrop-blur-2xl flex flex-col shrink-0 overflow-hidden transition-all duration-300 ${theme.panel}`}
@@ -1509,13 +1777,14 @@ export default function HomePage() {
         )}
       </div>
 
-      {/* ======================================================== */}
-      {/* ATMOSPHERE STUDIO MODAL (PRESETS vs CUSTOM DECK BUILDER) */}
-      {/* ======================================================== */}
+      {/* ==================================================================== */}
+      {/* SECTION 11: MODALS                                                   */}
+      {/* ==================================================================== */}
+
+      {/* 11.A: ATMOSPHERE & WEATHER STUDIO MODAL */}
       {showAtmosphereModal && (
         <div className="fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex items-center justify-center p-4">
           <div className={`w-full max-w-xl rounded-3xl p-6 shadow-2xl space-y-5 border max-h-[90vh] flex flex-col ${theme.modal}`}>
-            {/* Header */}
             <div className="flex items-center justify-between border-b pb-3 border-inherit shrink-0">
               <div className="flex items-center gap-2">
                 <Palette className="w-5 h-5 text-emerald-500" />
@@ -1529,7 +1798,7 @@ export default function HomePage() {
               </button>
             </div>
 
-            {/* TOP-LEVEL MODE TOGGLE */}
+            {/* Mode Switcher */}
             <div className="grid grid-cols-2 gap-2 bg-black/25 p-1 rounded-2xl border border-inherit shrink-0">
               <button
                 onClick={() => setAtmoMode('presets')}
@@ -1549,12 +1818,37 @@ export default function HomePage() {
               </button>
             </div>
 
-            {/* CONTENT AREA */}
+            {/* Modal Body */}
             <div className="flex-1 overflow-y-auto pr-1 space-y-4">
-              {/* MODE 1: 1-CLICK VIBE PRESETS */}
               {atmoMode === 'presets' ? (
-                <div className="space-y-2.5">
-                  <p className="text-xs opacity-60">Curated, complete aesthetics. One click sets image, live weather shaders, and matching colors.</p>
+                /* Mode 1: Presets */
+                <div className="space-y-4">
+                  {/* Chameleon Reality */}
+                  <div className="bg-gradient-to-r from-emerald-500/20 via-teal-500/10 to-transparent border border-emerald-500/30 p-4 rounded-2xl flex items-center justify-between">
+                    <div>
+                      <p className="font-bold text-xs flex items-center gap-1.5 text-emerald-400">
+                        <Compass className="w-4 h-4" /> Chameleon Reality (Live Weather & Clock Sync)
+                      </p>
+                      <p className="text-[11px] opacity-70 mt-1 max-w-sm">
+                        Automatically detects local rain, storms, snow, or clear skies, and mirrors day/night lighting.
+                      </p>
+                      {localWeather && (
+                        <p className="text-[10px] font-mono text-zinc-400 mt-1">
+                          Detected: {localWeather.description}
+                        </p>
+                      )}
+                    </div>
+
+                    <button
+                      onClick={applyChameleonReality}
+                      disabled={isDetectingWeather}
+                      className={`px-4 py-2 text-xs font-bold rounded-xl transition-all shadow-md shrink-0 ${theme.accentBtn}`}
+                    >
+                      {isDetectingWeather ? 'Syncing...' : 'Sync Reality'}
+                    </button>
+                  </div>
+
+                  {/* Curated Presets Cards */}
                   <div className="grid grid-cols-2 gap-2.5">
                     {VIBE_PRESETS.map((preset) => (
                       <button
@@ -1579,11 +1873,62 @@ export default function HomePage() {
                       </button>
                     ))}
                   </div>
+
+                  {/* Ambient Audio Selector */}
+                  <div className="space-y-2 border-t pt-4 border-inherit">
+                    <label className="text-[11px] font-mono uppercase tracking-wider opacity-70 flex items-center gap-1.5 font-bold">
+                      <Volume2 className="w-3.5 h-3.5 text-emerald-500" /> Layered Ambient Soundscape (Plays under Spotify)
+                    </label>
+
+                    <div className="grid grid-cols-4 gap-2">
+                      <button
+                        onClick={() => setAmbientSound('off')}
+                        className={`p-2 rounded-xl border text-xs font-semibold ${ambientSound === 'off' ? 'border-emerald-500 bg-emerald-500/10' : 'border-white/10'}`}
+                      >
+                        Muted
+                      </button>
+                      <button
+                        onClick={() => setAmbientSound('rain')}
+                        className={`p-2 rounded-xl border text-xs font-semibold flex items-center justify-center gap-1 ${ambientSound === 'rain' ? 'border-cyan-400 bg-cyan-400/10 text-cyan-300' : 'border-white/10'}`}
+                      >
+                        <CloudRain className="w-3.5 h-3.5" /> Rain
+                      </button>
+                      <button
+                        onClick={() => setAmbientSound('hearth')}
+                        className={`p-2 rounded-xl border text-xs font-semibold flex items-center justify-center gap-1 ${ambientSound === 'hearth' ? 'border-amber-400 bg-amber-400/10 text-amber-300' : 'border-white/10'}`}
+                      >
+                        <Flame className="w-3.5 h-3.5" /> Fireplace
+                      </button>
+                      <button
+                        onClick={() => setAmbientSound('wind')}
+                        className={`p-2 rounded-xl border text-xs font-semibold flex items-center justify-center gap-1 ${ambientSound === 'wind' ? 'border-sky-300 bg-sky-300/10 text-sky-200' : 'border-white/10'}`}
+                      >
+                        <Snowflake className="w-3.5 h-3.5" /> Wind
+                      </button>
+                    </div>
+
+                    {ambientSound !== 'off' && (
+                      <div className="space-y-1 pt-1">
+                        <div className="flex justify-between text-xs">
+                          <span>Soundscape Volume</span>
+                          <span className="font-mono opacity-60">{ambientVolume}%</span>
+                        </div>
+                        <input
+                          type="range"
+                          min="0"
+                          max="100"
+                          value={ambientVolume}
+                          onChange={(e) => setAmbientVolume(Number(e.target.value))}
+                          className="w-full h-1.5 bg-white/10 rounded-lg appearance-none cursor-pointer accent-emerald-500"
+                        />
+                      </div>
+                    )}
+                  </div>
                 </div>
               ) : (
-                /* MODE 2: CUSTOM DECK BUILDER (BUILD FROM ZERO) */
+                /* Mode 2: Custom Builder */
                 <div className="space-y-5">
-                  {/* STEP 1: WALLPAPER SOURCE */}
+                  {/* Step 1: Wallpaper Source */}
                   <div className="space-y-2.5">
                     <label className="text-[11px] font-mono uppercase tracking-wider opacity-70 flex items-center gap-1.5 font-bold">
                       <ImageIcon className="w-3.5 h-3.5 text-emerald-500" /> 1. Select Wallpaper Source
@@ -1625,7 +1970,6 @@ export default function HomePage() {
                       </button>
                     </div>
 
-                    {/* Gallery Images Grid */}
                     {bgMode === 'gallery' && (
                       <div className="grid grid-cols-4 gap-2 pt-1">
                         {GALLERY_WALLPAPERS.map((img) => (
@@ -1648,7 +1992,6 @@ export default function HomePage() {
                       </div>
                     )}
 
-                    {/* Custom Upload */}
                     {bgMode === 'custom' && (
                       <div className="pt-1 space-y-2">
                         <label className="border-2 border-dashed border-white/20 hover:border-emerald-500 rounded-2xl p-4 flex flex-col items-center justify-center cursor-pointer transition-colors bg-white/[0.02]">
@@ -1662,13 +2005,13 @@ export default function HomePage() {
                     )}
                   </div>
 
-                  {/* STEP 2: CAMERA & SLIDERS */}
+                  {/* Step 2: Camera & Filter Sliders */}
                   <div className="space-y-3 border-t pt-4 border-inherit">
                     <label className="text-[11px] font-mono uppercase tracking-wider opacity-70 flex items-center gap-1.5 font-bold">
                       <Sliders className="w-3.5 h-3.5 text-emerald-500" /> 2. Wallpaper Camera & Focus Sliders
                     </label>
 
-                    {/* Blur */}
+                    {/* Blur Slider */}
                     <div className="space-y-1">
                       <div className="flex justify-between text-xs">
                         <span>Blur Intensity</span>
@@ -1688,7 +2031,7 @@ export default function HomePage() {
                       />
                     </div>
 
-                    {/* Dimming */}
+                    {/* Dimming Slider */}
                     <div className="space-y-1">
                       <div className="flex justify-between text-xs">
                         <span>Dark Tint (Contrast with HUD)</span>
@@ -1708,7 +2051,7 @@ export default function HomePage() {
                       />
                     </div>
 
-                    {/* Vertical Crop */}
+                    {/* Vertical Crop Slider */}
                     <div className="space-y-1">
                       <div className="flex justify-between text-xs">
                         <span>Vertical Crop Position</span>
@@ -1730,7 +2073,7 @@ export default function HomePage() {
                       />
                     </div>
 
-                    {/* Zoom */}
+                    {/* Zoom / Scale Slider */}
                     <div className="space-y-1">
                       <div className="flex justify-between text-xs">
                         <span>Zoom / Scale</span>
@@ -1751,7 +2094,7 @@ export default function HomePage() {
                     </div>
                   </div>
 
-                  {/* STEP 3: LIVE WEATHER FX */}
+                  {/* Step 3: Weather Shaders */}
                   <div className="space-y-3 border-t pt-4 border-inherit">
                     <label className="text-[11px] font-mono uppercase tracking-wider opacity-70 flex items-center gap-1.5 font-bold">
                       <CloudRain className="w-3.5 h-3.5 text-cyan-400" /> 3. Live Real-Time Weather Shaders
@@ -1839,13 +2182,12 @@ export default function HomePage() {
                     )}
                   </div>
 
-                  {/* STEP 4: DECK PALETTE & LAYOUT */}
+                  {/* Step 4: Layout & Colors */}
                   <div className="space-y-3 border-t pt-4 border-inherit">
                     <label className="text-[11px] font-mono uppercase tracking-wider opacity-70 flex items-center gap-1.5 font-bold">
                       <LayoutGrid className="w-3.5 h-3.5 text-emerald-500" /> 4. Layout Mode & Accent Colors
                     </label>
 
-                    {/* Layout */}
                     <div className="grid grid-cols-2 gap-2">
                       <button
                         onClick={() => changeLayout('studio')}
@@ -1865,7 +2207,6 @@ export default function HomePage() {
                       </button>
                     </div>
 
-                    {/* Color Swatches */}
                     <div className="grid grid-cols-3 gap-2 pt-1">
                       <button
                         onClick={() => changeColorTheme('dark')}
@@ -1934,7 +2275,7 @@ export default function HomePage() {
         </div>
       )}
 
-      {/* SPOTIFY CONNECT DEVICES MODAL */}
+      {/* 11.B: SPOTIFY CONNECT DEVICES MODAL */}
       {showDevicesModal && (
         <div className="fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex items-center justify-center p-4">
           <div className={`w-full max-w-md rounded-3xl p-6 shadow-2xl space-y-5 border ${theme.modal}`}>
@@ -2015,7 +2356,7 @@ export default function HomePage() {
         </div>
       )}
 
-      {/* SETTINGS MODAL */}
+      {/* 11.C: SETTINGS & API KEYS MODAL */}
       {showSettingsModal && (
         <div className="fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex items-center justify-center p-4">
           <div className={`w-full max-w-md rounded-3xl p-6 shadow-2xl space-y-5 border ${theme.modal}`}>
@@ -2029,7 +2370,6 @@ export default function HomePage() {
               </button>
             </div>
 
-            {/* API KEY */}
             <div className="space-y-2">
               <div className="flex items-center justify-between">
                 <label className="text-[11px] font-mono uppercase tracking-wider opacity-60">
@@ -2053,7 +2393,6 @@ export default function HomePage() {
               />
             </div>
 
-            {/* SPOTIFY SYNC */}
             <div className="space-y-2 border-t pt-3 border-inherit">
               <label className="text-[11px] font-mono uppercase tracking-wider opacity-60">
                 Spotify Sync
@@ -2081,7 +2420,7 @@ export default function HomePage() {
         </div>
       )}
 
-      {/* SPOTIFY LOGIN MODAL */}
+      {/* 11.D: SPOTIFY AUTHENTICATION MODAL */}
       {showSpotifyModal && (
         <div className="fixed inset-0 bg-black/85 backdrop-blur-md z-50 flex items-center justify-center p-4">
           <div className="bg-[#0c0d12] border border-white/10 w-full max-w-md rounded-3xl p-7 shadow-2xl text-center space-y-5 text-white">
