@@ -24,11 +24,9 @@ import {
   Palette,
   Maximize2,
   LayoutGrid,
-  Minimize2,
-  Flame,
-  Waves,
-  Sun,
-  Moon,
+  Image as ImageIcon,
+  Upload,
+  Sliders,
 } from 'lucide-react';
 import { getAccessToken, spotifyFetch, redirectToSpotifyAuth, SpotifyAPI } from '@/lib/spotify';
 import { askGemini, ChatMessage, CopilotResponse } from '@/lib/gemini';
@@ -57,12 +55,56 @@ interface SpotifyDevice {
   is_active: boolean;
 }
 
-type LayoutPreset = 'studio' | 'cinema' | 'mini';
+type LayoutPreset = 'studio' | 'cinema';
 type ColorPreset = 'dark' | 'light' | 'neon' | 'aqua' | 'amber' | 'oled';
+type BgMode = 'album' | 'preset' | 'custom';
+
+// Curated High-Resolution Aesthetic Presets (Zero Git Bloat)
+const PRESET_BACKGROUNDS = [
+  {
+    id: 'tokyo-rain',
+    name: 'Tokyo Rain',
+    url: 'https://images.unsplash.com/photo-1514565131-fce0801e5785?q=80&w=1920&auto=format&fit=crop',
+  },
+  {
+    id: 'cyberpunk-neon',
+    name: 'Cyberpunk Alley',
+    url: 'https://images.unsplash.com/photo-1508739773434-c26b3d09e071?q=80&w=1920&auto=format&fit=crop',
+  },
+  {
+    id: 'lofi-chill',
+    name: 'Cosmic Nebula',
+    url: 'https://images.unsplash.com/photo-1534447677768-be436bb09401?q=80&w=1920&auto=format&fit=crop',
+  },
+  {
+    id: 'vinyl-studio',
+    name: 'Analog Vinyl Studio',
+    url: 'https://images.unsplash.com/photo-1539185441755-769473a23570?q=80&w=1920&auto=format&fit=crop',
+  },
+  {
+    id: 'misty-forest',
+    name: 'Dark Forest',
+    url: 'https://images.unsplash.com/photo-1448375240586-882707db888b?q=80&w=1920&auto=format&fit=crop',
+  },
+  {
+    id: 'holographic-mesh',
+    name: 'Fluid Waves',
+    url: 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?q=80&w=1920&auto=format&fit=crop',
+  },
+];
 
 export default function HomePage() {
   const [layout, setLayout] = useState<LayoutPreset>('studio');
   const [colorTheme, setColorTheme] = useState<ColorPreset>('dark');
+
+  // Background Customizer State
+  const [bgMode, setBgMode] = useState<BgMode>('album');
+  const [bgPresetUrl, setBgPresetUrl] = useState(PRESET_BACKGROUNDS[0].url);
+  const [bgCustomUrl, setBgCustomUrl] = useState('');
+  const [bgBlur, setBgBlur] = useState<number>(16);
+  const [bgDim, setBgDim] = useState<number>(65);
+  const [bgPosY, setBgPosY] = useState<number>(50);
+  const [bgScale, setBgScale] = useState<number>(105);
 
   const [isAuthenticated, setIsAuthenticated] = useState<boolean | null>(null);
   const [spotifyClientId, setSpotifyClientId] = useState('');
@@ -113,10 +155,31 @@ export default function HomePage() {
   // Initial Load
   useEffect(() => {
     const savedLayout = (localStorage.getItem('trackdeck_layout') as LayoutPreset) || 'studio';
-    setLayout(savedLayout);
+    setLayout(savedLayout === 'studio' || savedLayout === 'cinema' ? savedLayout : 'studio');
 
     const savedColor = (localStorage.getItem('trackdeck_color_theme') as ColorPreset) || 'dark';
     setColorTheme(savedColor);
+
+    const savedBgMode = (localStorage.getItem('trackdeck_bg_mode') as BgMode) || 'album';
+    setBgMode(savedBgMode);
+
+    const savedBgPreset = localStorage.getItem('trackdeck_bg_preset') || PRESET_BACKGROUNDS[0].url;
+    setBgPresetUrl(savedBgPreset);
+
+    const savedBgCustom = localStorage.getItem('trackdeck_bg_custom') || '';
+    setBgCustomUrl(savedBgCustom);
+
+    const savedBlur = Number(localStorage.getItem('trackdeck_bg_blur') ?? 16);
+    setBgBlur(savedBlur);
+
+    const savedDim = Number(localStorage.getItem('trackdeck_bg_dim') ?? 65);
+    setBgDim(savedDim);
+
+    const savedPosY = Number(localStorage.getItem('trackdeck_bg_pos_y') ?? 50);
+    setBgPosY(savedPosY);
+
+    const savedScale = Number(localStorage.getItem('trackdeck_bg_scale') ?? 105);
+    setBgScale(savedScale);
 
     const savedKey = localStorage.getItem('gemini_api_key') || '';
     setGeminiKey(savedKey);
@@ -160,6 +223,48 @@ export default function HomePage() {
     localStorage.setItem('trackdeck_color_theme', newTheme);
   }
 
+  function updateBgParam(key: string, val: string | number) {
+    localStorage.setItem(key, String(val));
+  }
+
+  // In-Browser Image Compressor for Local Uploads (Never exceeds quota)
+  function handleImageUpload(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const img = new Image();
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        const maxDim = 1280;
+        let w = img.width;
+        let h = img.height;
+        if (w > maxDim || h > maxDim) {
+          if (w > h) {
+            h = Math.round((h * maxDim) / w);
+            w = maxDim;
+          } else {
+            w = Math.round((w * maxDim) / h);
+            h = maxDim;
+          }
+        }
+        canvas.width = w;
+        canvas.height = h;
+        const ctx = canvas.getContext('2d');
+        ctx?.drawImage(img, 0, 0, w, h);
+        const compressedBase64 = canvas.toDataURL('image/jpeg', 0.8);
+
+        setBgCustomUrl(compressedBase64);
+        setBgMode('custom');
+        localStorage.setItem('trackdeck_bg_custom', compressedBase64);
+        localStorage.setItem('trackdeck_bg_mode', 'custom');
+      };
+      img.src = event.target?.result as string;
+    };
+    reader.readAsDataURL(file);
+  }
+
   // Polling
   useEffect(() => {
     if (!isAuthenticated) return;
@@ -195,7 +300,6 @@ export default function HomePage() {
     chatBottomRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
-  // Load Devices
   async function loadDevices() {
     try {
       const data = await SpotifyAPI.getDevices();
@@ -209,7 +313,6 @@ export default function HomePage() {
     }
   }
 
-  // Transfer Playback
   async function handleTransferDevice(devId: string) {
     try {
       isActionPending.current = true;
@@ -389,7 +492,6 @@ export default function HomePage() {
     }
   }
 
-  // Media Handlers
   async function togglePlay() {
     if (!playback) return;
     const targetState = !playback.isPlaying;
@@ -430,6 +532,7 @@ export default function HomePage() {
       setTimeout(() => {
         isActionPending.current = false;
         fetchNowPlaying();
+        loadQueue();
       }, 500);
     }
   }
@@ -499,7 +602,6 @@ export default function HomePage() {
     ]);
   }
 
-  // AI Chat Sender
   async function sendToGemini(textToSend: string) {
     if (!textToSend.trim() || isAiLoading) return;
     if (!geminiKey) {
@@ -549,7 +651,7 @@ export default function HomePage() {
     ? Math.min(100, Math.max(0, (playback.progressMs / playback.durationMs) * 100))
     : 0;
 
-  // --- THEME COLOR ENGINE ---
+  // Theme styling definitions
   const themeClasses: Record<
     ColorPreset,
     {
@@ -641,20 +743,43 @@ export default function HomePage() {
 
   const theme = themeClasses[colorTheme];
 
+  // Active Background Resolver
+  const activeBgImage =
+    bgMode === 'custom' && bgCustomUrl
+      ? bgCustomUrl
+      : bgMode === 'preset'
+      ? bgPresetUrl
+      : playback?.albumArt || '';
+
   return (
     <div
       className={`h-screen w-screen overflow-hidden flex flex-col font-sans select-none transition-colors duration-500 ${theme.root}`}
     >
-      {/* Ambient Glow */}
-      {playback?.albumArt && (
-        <div
-          className="fixed inset-0 pointer-events-none transition-all duration-1000 scale-125 z-0 opacity-20 blur-[160px]"
-          style={{
-            backgroundImage: `url(${playback.albumArt})`,
-            backgroundPosition: 'center',
-            backgroundSize: 'cover',
-          }}
-        />
+      {/* ======================================================== */}
+      {/* DYNAMIC BACKGROUND SYSTEM (BLUR, CROP, SCALE & OVERLAY)   */}
+      {/* ======================================================== */}
+      {activeBgImage && (
+        <>
+          <div
+            className="fixed inset-0 pointer-events-none transition-all duration-700 z-0"
+            style={{
+              backgroundImage: `url(${activeBgImage})`,
+              backgroundPosition: `center ${bgPosY}%`,
+              backgroundSize: `${bgScale}%`,
+              backgroundRepeat: 'no-repeat',
+              filter: `blur(${bgBlur}px)`,
+              transform: 'scale(1.1)', // Prevents white blur edges
+            }}
+          />
+          {/* Darkness Dimming Tint Overlay */}
+          <div
+            className="fixed inset-0 pointer-events-none z-0 transition-opacity duration-500"
+            style={{
+              backgroundColor: colorTheme === 'light' ? '#ffffff' : '#000000',
+              opacity: bgDim / 100,
+            }}
+          />
+        </>
       )}
 
       {/* ======================================================== */}
@@ -704,7 +829,7 @@ export default function HomePage() {
           {/* Atmosphere Palette Button */}
           <button
             onClick={() => setShowAtmosphereModal(true)}
-            title="Atmosphere & Layout Themes"
+            title="Atmosphere, Wallpapers & Layout"
             className="p-1.5 rounded-lg hover:bg-white/10 transition-colors flex items-center gap-1 text-xs"
           >
             <Palette className="w-4 h-4 text-emerald-500" />
@@ -733,11 +858,11 @@ export default function HomePage() {
       </header>
 
       {/* ======================================================== */}
-      {/* 2. DYNAMIC WORKSPACE (STUDIO vs CINEMA vs MINI-PLAYER)   */}
+      {/* 2. MAIN WORKSPACE (STUDIO vs CINEMA)                     */}
       {/* ======================================================== */}
       <div className="relative z-10 flex-1 flex overflow-hidden">
         
-        {/* LEFT WING: PLAYLISTS (Visible only in 'studio' layout) */}
+        {/* LEFT WING: PLAYLISTS (Studio only) */}
         {layout === 'studio' && (
           <aside
             className={`h-full w-64 border-r backdrop-blur-2xl flex flex-col shrink-0 overflow-hidden transition-all duration-300 ${theme.panel}`}
@@ -832,34 +957,24 @@ export default function HomePage() {
           </aside>
         )}
 
-        {/* CENTER STAGE: ADAPTS TO 'STUDIO', 'CINEMA', AND 'MINI' */}
+        {/* CENTER STAGE */}
         <main
           className={`flex-1 flex flex-col justify-between overflow-hidden transition-all duration-500 ${
-            layout === 'cinema'
-              ? 'px-8 py-6 max-w-4xl mx-auto'
-              : layout === 'mini'
-              ? 'p-3 max-w-sm mx-auto'
-              : 'px-6 py-4'
+            layout === 'cinema' ? 'px-8 py-6 max-w-4xl mx-auto' : 'px-6 py-4'
           }`}
         >
-          {/* UPPER DECK: VINYL SHOWCASE */}
+          {/* UPPER DECK */}
           <div className="flex-1 flex flex-col items-center justify-center min-h-0">
             <div
               className={`flex flex-col items-center text-center transition-all duration-500 ${
-                layout === 'cinema'
-                  ? 'w-full max-w-lg'
-                  : layout === 'mini'
-                  ? 'w-full max-w-xs'
-                  : 'w-full max-w-md'
+                layout === 'cinema' ? 'w-full max-w-lg' : 'w-full max-w-md'
               }`}
             >
-              {/* Album Art (Sizes dynamically per layout) */}
+              {/* Album Art */}
               <div
                 className={`relative aspect-square rounded-3xl overflow-hidden border shadow-2xl mb-4 group flex items-center justify-center transition-all duration-500 ${
                   layout === 'cinema'
                     ? 'w-64 md:w-80 shadow-[0_25px_60px_rgba(0,0,0,0.9)]'
-                    : layout === 'mini'
-                    ? 'w-40 md:w-44'
                     : 'w-56 md:w-64'
                 } ${theme.panel}`}
               >
@@ -889,7 +1004,7 @@ export default function HomePage() {
               <div className="space-y-0.5 px-4 mb-3 w-full">
                 <h2
                   className={`font-bold truncate tracking-tight transition-all ${
-                    layout === 'cinema' ? 'text-2xl' : layout === 'mini' ? 'text-base' : 'text-lg'
+                    layout === 'cinema' ? 'text-2xl' : 'text-lg'
                   }`}
                 >
                   {playback?.name || 'Awaiting Track...'}
@@ -918,25 +1033,23 @@ export default function HomePage() {
               </div>
 
               {/* Media Controls */}
-              <div className={`flex items-center justify-center ${layout === 'mini' ? 'gap-5' : 'gap-8'}`}>
+              <div className="flex items-center justify-center gap-8">
                 <button
                   onClick={handlePrev}
                   disabled={!playback}
                   className="p-2 opacity-70 hover:opacity-100 active:scale-90 disabled:opacity-30 transition-all"
                 >
-                  <SkipBack className={layout === 'mini' ? 'w-4 h-4' : 'w-5 h-5'} />
+                  <SkipBack className="w-5 h-5" />
                 </button>
                 <button
                   onClick={togglePlay}
                   disabled={!playback}
-                  className={`rounded-2xl shadow-xl transition-all hover:scale-105 active:scale-95 disabled:opacity-30 ${
-                    layout === 'mini' ? 'p-3' : 'p-4'
-                  } ${theme.accentBtn}`}
+                  className={`p-4 rounded-2xl shadow-xl transition-all hover:scale-105 active:scale-95 disabled:opacity-30 ${theme.accentBtn}`}
                 >
                   {playback?.isPlaying ? (
-                    <Pause className={layout === 'mini' ? 'w-5 h-5 fill-current' : 'w-6 h-6 fill-current'} />
+                    <Pause className="w-6 h-6 fill-current" />
                   ) : (
-                    <Play className={layout === 'mini' ? 'w-5 h-5 fill-current ml-0.5' : 'w-6 h-6 fill-current ml-0.5'} />
+                    <Play className="w-6 h-6 fill-current ml-0.5" />
                   )}
                 </button>
                 <button
@@ -944,7 +1057,7 @@ export default function HomePage() {
                   disabled={!playback}
                   className="p-2 opacity-70 hover:opacity-100 active:scale-90 disabled:opacity-30 transition-all"
                 >
-                  <SkipForward className={layout === 'mini' ? 'w-4 h-4' : 'w-5 h-5'} />
+                  <SkipForward className="w-5 h-5" />
                 </button>
               </div>
             </div>
@@ -952,9 +1065,7 @@ export default function HomePage() {
 
           {/* LOWER DECK: WIDE CHAT */}
           <div
-            className={`w-full mx-auto border rounded-2xl backdrop-blur-2xl flex flex-col justify-between p-3 shrink-0 shadow-lg transition-all duration-300 ${
-              layout === 'mini' ? 'h-[16vh] max-w-sm' : 'h-[20vh] max-w-3xl'
-            } ${theme.panel}`}
+            className={`w-full mx-auto border rounded-2xl backdrop-blur-2xl flex flex-col justify-between p-3 shrink-0 shadow-lg h-[20vh] max-w-3xl transition-all duration-300 ${theme.panel}`}
           >
             <div className="flex-1 overflow-y-auto space-y-1.5 pr-2 text-xs">
               {messages.map((m, i) => (
@@ -998,7 +1109,7 @@ export default function HomePage() {
           </div>
         </main>
 
-        {/* RIGHT WING: QUEUE (Visible only in 'studio' layout) */}
+        {/* RIGHT WING: QUEUE (Studio only) */}
         {layout === 'studio' && (
           <aside
             className={`h-full w-64 border-l backdrop-blur-2xl flex flex-col shrink-0 overflow-hidden transition-all duration-300 ${theme.panel}`}
@@ -1042,28 +1153,27 @@ export default function HomePage() {
       </div>
 
       {/* ======================================================== */}
-      {/* ATMOSPHERE & LAYOUT MODAL (🎨 PALETTE BUTTON)            */}
+      {/* ATMOSPHERE, WALLPAPERS & SLIDERS MODAL (🎨 PALETTE)      */}
       {/* ======================================================== */}
       {showAtmosphereModal && (
         <div className="fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex items-center justify-center p-4">
-          <div className={`w-full max-w-lg rounded-3xl p-6 shadow-2xl space-y-6 border ${theme.modal}`}>
+          <div className={`w-full max-w-lg rounded-3xl p-6 shadow-2xl space-y-5 border max-h-[90vh] overflow-y-auto ${theme.modal}`}>
             <div className="flex items-center justify-between border-b pb-3 border-inherit">
               <div className="flex items-center gap-2">
                 <Palette className="w-5 h-5 text-emerald-500" />
-                <h3 className="font-bold text-sm">Atmosphere & Deck Setup</h3>
+                <h3 className="font-bold text-sm">Atmosphere & Wallpaper Studio</h3>
               </div>
               <button onClick={() => setShowAtmosphereModal(false)} className="opacity-50 hover:opacity-100 p-1">
                 <X className="w-4 h-4" />
               </button>
             </div>
 
-            {/* SECTION 1: LAYOUT PRESETS */}
+            {/* 1. LAYOUT SELECTION (Studio vs Cinema) */}
             <div className="space-y-2">
               <label className="text-[11px] font-mono uppercase tracking-wider opacity-60 flex items-center gap-1.5">
                 <LayoutGrid className="w-3.5 h-3.5" /> Layout Mode
               </label>
-              <div className="grid grid-cols-3 gap-2.5">
-                {/* Studio */}
+              <div className="grid grid-cols-2 gap-2.5">
                 <button
                   onClick={() => changeLayout('studio')}
                   className={`p-3 rounded-2xl border text-left space-y-1 transition-all ${
@@ -1078,7 +1188,6 @@ export default function HomePage() {
                   <p className="text-[10px] opacity-60 leading-tight">3-column command center with playlists & queue.</p>
                 </button>
 
-                {/* Cinema */}
                 <button
                   onClick={() => changeLayout('cinema')}
                   className={`p-3 rounded-2xl border text-left space-y-1 transition-all ${
@@ -1088,92 +1197,237 @@ export default function HomePage() {
                   }`}
                 >
                   <p className="font-bold text-xs flex items-center justify-between">
-                    Cinema <Maximize2 className="w-3.5 h-3.5 opacity-60" />
+                    Cinema Focus <Maximize2 className="w-3.5 h-3.5 opacity-60" />
                   </p>
-                  <p className="text-[10px] opacity-60 leading-tight">Sidebars hidden. Grand album art focus.</p>
-                </button>
-
-                {/* Mini */}
-                <button
-                  onClick={() => changeLayout('mini')}
-                  className={`p-3 rounded-2xl border text-left space-y-1 transition-all ${
-                    layout === 'mini'
-                      ? 'border-emerald-500 ring-2 ring-emerald-500/20 bg-emerald-500/10'
-                      : 'border-white/10 hover:border-white/20'
-                  }`}
-                >
-                  <p className="font-bold text-xs flex items-center justify-between">
-                    Mini <Minimize2 className="w-3.5 h-3.5 opacity-60" />
-                  </p>
-                  <p className="text-[10px] opacity-60 leading-tight">Compact card for multitasking & homework.</p>
+                  <p className="text-[10px] opacity-60 leading-tight">Sidebars hidden. Grand album art centerpiece.</p>
                 </button>
               </div>
             </div>
 
-            {/* SECTION 2: COLOR PRESETS */}
+            {/* 2. BACKGROUND SOURCE SELECTOR */}
             <div className="space-y-2 border-t pt-4 border-inherit">
               <label className="text-[11px] font-mono uppercase tracking-wider opacity-60 flex items-center gap-1.5">
-                <Palette className="w-3.5 h-3.5" /> Color Presets
+                <ImageIcon className="w-3.5 h-3.5" /> Wallpaper Source
+              </label>
+
+              <div className="grid grid-cols-3 gap-2">
+                <button
+                  onClick={() => {
+                    setBgMode('album');
+                    updateBgParam('trackdeck_bg_mode', 'album');
+                  }}
+                  className={`p-2.5 rounded-xl border text-xs font-semibold transition-all ${
+                    bgMode === 'album' ? 'border-emerald-500 bg-emerald-500/10' : 'border-white/10'
+                  }`}
+                >
+                  Album Glow
+                </button>
+                <button
+                  onClick={() => {
+                    setBgMode('preset');
+                    updateBgParam('trackdeck_bg_mode', 'preset');
+                  }}
+                  className={`p-2.5 rounded-xl border text-xs font-semibold transition-all ${
+                    bgMode === 'preset' ? 'border-emerald-500 bg-emerald-500/10' : 'border-white/10'
+                  }`}
+                >
+                  Curated Presets
+                </button>
+                <button
+                  onClick={() => {
+                    setBgMode('custom');
+                    updateBgParam('trackdeck_bg_mode', 'custom');
+                  }}
+                  className={`p-2.5 rounded-xl border text-xs font-semibold transition-all ${
+                    bgMode === 'custom' ? 'border-emerald-500 bg-emerald-500/10' : 'border-white/10'
+                  }`}
+                >
+                  Custom Photo
+                </button>
+              </div>
+
+              {/* PRESETS GRID */}
+              {bgMode === 'preset' && (
+                <div className="grid grid-cols-3 gap-2 pt-2">
+                  {PRESET_BACKGROUNDS.map((preset) => (
+                    <button
+                      key={preset.id}
+                      onClick={() => {
+                        setBgPresetUrl(preset.url);
+                        updateBgParam('trackdeck_bg_preset', preset.url);
+                      }}
+                      className={`relative aspect-video rounded-xl overflow-hidden border transition-all group ${
+                        bgPresetUrl === preset.url ? 'border-emerald-500 ring-2 ring-emerald-500/40' : 'border-white/10'
+                      }`}
+                    >
+                      <img src={preset.url} alt={preset.name} className="w-full h-full object-cover group-hover:scale-105 transition-transform" />
+                      <div className="absolute inset-0 bg-black/40 flex items-end p-1.5">
+                        <span className="text-[10px] font-bold text-white truncate">{preset.name}</span>
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              )}
+
+              {/* CUSTOM UPLOAD BOX */}
+              {bgMode === 'custom' && (
+                <div className="pt-2 space-y-2">
+                  <label className="border-2 border-dashed border-white/20 hover:border-emerald-500 rounded-2xl p-4 flex flex-col items-center justify-center cursor-pointer transition-colors bg-white/[0.02]">
+                    <Upload className="w-6 h-6 text-emerald-500 mb-1" />
+                    <span className="text-xs font-semibold">Upload Photo from Chromebook</span>
+                    <span className="text-[10px] opacity-50">Auto-compressed into browser memory</span>
+                    <input type="file" accept="image/*" onChange={handleImageUpload} className="hidden" />
+                  </label>
+
+                  {bgCustomUrl && (
+                    <p className="text-[10px] text-emerald-400 font-mono text-center">✓ Custom photo loaded</p>
+                  )}
+                </div>
+              )}
+            </div>
+
+            {/* 3. WALLPAPER SLIDERS (BLUR, DIM, CROP & SCALE) */}
+            <div className="space-y-3.5 border-t pt-4 border-inherit">
+              <label className="text-[11px] font-mono uppercase tracking-wider opacity-60 flex items-center gap-1.5">
+                <Sliders className="w-3.5 h-3.5" /> Wallpaper Adjustment Controls
+              </label>
+
+              {/* Blur Slider */}
+              <div className="space-y-1">
+                <div className="flex justify-between text-xs">
+                  <span>Blur Intensity</span>
+                  <span className="font-mono opacity-60">{bgBlur}px</span>
+                </div>
+                <input
+                  type="range"
+                  min="0"
+                  max="40"
+                  value={bgBlur}
+                  onChange={(e) => {
+                    const val = Number(e.target.value);
+                    setBgBlur(val);
+                    updateBgParam('trackdeck_bg_blur', val);
+                  }}
+                  className="w-full h-1.5 bg-white/10 rounded-lg appearance-none cursor-pointer accent-emerald-500"
+                />
+              </div>
+
+              {/* Dimming Darkness Slider */}
+              <div className="space-y-1">
+                <div className="flex justify-between text-xs">
+                  <span>Darkness Tint (Readability)</span>
+                  <span className="font-mono opacity-60">{bgDim}%</span>
+                </div>
+                <input
+                  type="range"
+                  min="10"
+                  max="90"
+                  value={bgDim}
+                  onChange={(e) => {
+                    const val = Number(e.target.value);
+                    setBgDim(val);
+                    updateBgParam('trackdeck_bg_dim', val);
+                  }}
+                  className="w-full h-1.5 bg-white/10 rounded-lg appearance-none cursor-pointer accent-emerald-500"
+                />
+              </div>
+
+              {/* Vertical Crop Alignment Slider */}
+              <div className="space-y-1">
+                <div className="flex justify-between text-xs">
+                  <span>Vertical Crop Position</span>
+                  <span className="font-mono opacity-60">
+                    {bgPosY < 35 ? 'Top' : bgPosY > 65 ? 'Bottom' : 'Center'} ({bgPosY}%)
+                  </span>
+                </div>
+                <input
+                  type="range"
+                  min="0"
+                  max="100"
+                  value={bgPosY}
+                  onChange={(e) => {
+                    const val = Number(e.target.value);
+                    setBgPosY(val);
+                    updateBgParam('trackdeck_bg_pos_y', val);
+                  }}
+                  className="w-full h-1.5 bg-white/10 rounded-lg appearance-none cursor-pointer accent-emerald-500"
+                />
+              </div>
+
+              {/* Zoom Scale Slider */}
+              <div className="space-y-1">
+                <div className="flex justify-between text-xs">
+                  <span>Zoom / Scale</span>
+                  <span className="font-mono opacity-60">{bgScale}%</span>
+                </div>
+                <input
+                  type="range"
+                  min="100"
+                  max="150"
+                  value={bgScale}
+                  onChange={(e) => {
+                    const val = Number(e.target.value);
+                    setBgScale(val);
+                    updateBgParam('trackdeck_bg_scale', val);
+                  }}
+                  className="w-full h-1.5 bg-white/10 rounded-lg appearance-none cursor-pointer accent-emerald-500"
+                />
+              </div>
+            </div>
+
+            {/* 4. COLOR ACCENTS */}
+            <div className="space-y-2 border-t pt-4 border-inherit">
+              <label className="text-[11px] font-mono uppercase tracking-wider opacity-60">
+                Color Preset
               </label>
               <div className="grid grid-cols-3 gap-2">
-                {/* Obsidian */}
                 <button
                   onClick={() => changeColorTheme('dark')}
-                  className={`p-2.5 rounded-2xl border flex items-center gap-2 text-xs font-semibold transition-all ${
+                  className={`p-2 rounded-xl border flex items-center gap-2 text-xs font-semibold ${
                     colorTheme === 'dark' ? 'border-emerald-500 bg-emerald-500/10' : 'border-white/10'
                   }`}
                 >
-                  <span className="w-3.5 h-3.5 rounded-full bg-emerald-500 shrink-0" /> Obsidian
+                  <span className="w-3 h-3 rounded-full bg-emerald-500 shrink-0" /> Obsidian
                 </button>
-
-                {/* Pearl Light */}
                 <button
                   onClick={() => changeColorTheme('light')}
-                  className={`p-2.5 rounded-2xl border flex items-center gap-2 text-xs font-semibold transition-all ${
+                  className={`p-2 rounded-xl border flex items-center gap-2 text-xs font-semibold ${
                     colorTheme === 'light' ? 'border-emerald-500 bg-emerald-500/10' : 'border-white/10'
                   }`}
                 >
-                  <span className="w-3.5 h-3.5 rounded-full bg-zinc-200 border border-zinc-400 shrink-0" /> Pearl Light
+                  <span className="w-3 h-3 rounded-full bg-zinc-200 border border-zinc-400 shrink-0" /> Pearl Light
                 </button>
-
-                {/* Cyber Neon */}
                 <button
                   onClick={() => changeColorTheme('neon')}
-                  className={`p-2.5 rounded-2xl border flex items-center gap-2 text-xs font-semibold transition-all ${
+                  className={`p-2 rounded-xl border flex items-center gap-2 text-xs font-semibold ${
                     colorTheme === 'neon' ? 'border-pink-500 bg-pink-500/10' : 'border-white/10'
                   }`}
                 >
-                  <span className="w-3.5 h-3.5 rounded-full bg-gradient-to-tr from-pink-500 to-cyan-400 shrink-0" /> Cyber Neon
+                  <span className="w-3 h-3 rounded-full bg-pink-500 shrink-0" /> Cyber Neon
                 </button>
-
-                {/* Ocean Aqua */}
                 <button
                   onClick={() => changeColorTheme('aqua')}
-                  className={`p-2.5 rounded-2xl border flex items-center gap-2 text-xs font-semibold transition-all ${
+                  className={`p-2 rounded-xl border flex items-center gap-2 text-xs font-semibold ${
                     colorTheme === 'aqua' ? 'border-cyan-400 bg-cyan-400/10' : 'border-white/10'
                   }`}
                 >
-                  <span className="w-3.5 h-3.5 rounded-full bg-gradient-to-tr from-cyan-400 to-teal-400 shrink-0" /> Ocean Aqua
+                  <span className="w-3 h-3 rounded-full bg-cyan-400 shrink-0" /> Ocean Aqua
                 </button>
-
-                {/* Sunset Amber */}
                 <button
                   onClick={() => changeColorTheme('amber')}
-                  className={`p-2.5 rounded-2xl border flex items-center gap-2 text-xs font-semibold transition-all ${
+                  className={`p-2 rounded-xl border flex items-center gap-2 text-xs font-semibold ${
                     colorTheme === 'amber' ? 'border-amber-500 bg-amber-500/10' : 'border-white/10'
                   }`}
                 >
-                  <span className="w-3.5 h-3.5 rounded-full bg-gradient-to-tr from-amber-500 to-orange-500 shrink-0" /> Sunset Amber
+                  <span className="w-3 h-3 rounded-full bg-amber-500 shrink-0" /> Sunset Amber
                 </button>
-
-                {/* OLED Zero */}
                 <button
                   onClick={() => changeColorTheme('oled')}
-                  className={`p-2.5 rounded-2xl border flex items-center gap-2 text-xs font-semibold transition-all ${
+                  className={`p-2 rounded-xl border flex items-center gap-2 text-xs font-semibold ${
                     colorTheme === 'oled' ? 'border-white bg-white/10' : 'border-white/10'
                   }`}
                 >
-                  <span className="w-3.5 h-3.5 rounded-full bg-black border border-white shrink-0" /> OLED Zero
+                  <span className="w-3 h-3 rounded-full bg-black border border-white shrink-0" /> OLED Zero
                 </button>
               </div>
             </div>
@@ -1183,7 +1437,7 @@ export default function HomePage() {
                 onClick={() => setShowAtmosphereModal(false)}
                 className={`px-5 py-2 text-xs font-bold rounded-xl shadow-md ${theme.accentBtn}`}
               >
-                Apply Atmosphere
+                Apply & Close
               </button>
             </div>
           </div>
