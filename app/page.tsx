@@ -81,11 +81,14 @@ type AmbientSoundType = 'off' | 'rain' | 'hearth' | 'wind';
 
 // ============================================================================
 // SECTION 2: CONFIGURATION & PRESET DATA
-// (Tip: Add your own wallpapers, color themes, and sounds here!)
 // ============================================================================
 
-// A. Curated Wallpapers (Strictly Zero People, Pure Atmospheres)
 const GALLERY_WALLPAPERS = [
+  {
+    id: 'sunny-day',
+    name: 'Clear Golden Day',
+    url: 'https://images.unsplash.com/photo-1500534314209-a25ddb2bd429?q=80&w=1920&auto=format&fit=crop',
+  },
   {
     id: 'thunderstorm-sky',
     name: 'Night Lightning Storm',
@@ -116,22 +119,15 @@ const GALLERY_WALLPAPERS = [
     name: 'Vintage Vinyl Studio',
     url: 'https://images.unsplash.com/photo-1539185441755-769473a23570?q=80&w=1920&auto=format&fit=crop',
   },
-  {
-    id: 'deep-cosmos',
-    name: 'Deep Cosmos Nebula',
-    url: 'https://images.unsplash.com/photo-1534447677768-be436bb09401?q=80&w=1920&auto=format&fit=crop',
-  },
 ];
 
-// B. 1-Click Complete Vibe Packs
 const VIBE_PRESETS = [
   {
     id: 'thunderstorm-pack',
     name: 'Midnight Thunderstorm',
     desc: 'Lightning storm clouds with falling rain & slate accents',
-    url: GALLERY_WALLPAPERS[0].url,
+    url: GALLERY_WALLPAPERS[1].url,
     effect: 'thunderstorm' as WeatherEffect,
-    color: 'dark' as ColorPreset,
     sound: 'rain' as AmbientSoundType,
     blur: 6,
     dim: 50,
@@ -140,9 +136,8 @@ const VIBE_PRESETS = [
     id: 'alpine-pack',
     name: 'Alpine Blizzard',
     desc: 'Snow-capped mountain valley with realistic drifting snow & silver accents',
-    url: GALLERY_WALLPAPERS[1].url,
+    url: GALLERY_WALLPAPERS[2].url,
     effect: 'snow' as WeatherEffect,
-    color: 'oled' as ColorPreset,
     sound: 'wind' as AmbientSoundType,
     blur: 8,
     dim: 45,
@@ -151,9 +146,8 @@ const VIBE_PRESETS = [
     id: 'hearth-pack',
     name: 'Cozy Hearth & Fire',
     desc: 'Crackling fireplace with rising embers & warm amber accents',
-    url: GALLERY_WALLPAPERS[2].url,
+    url: GALLERY_WALLPAPERS[3].url,
     effect: 'embers' as WeatherEffect,
-    color: 'amber' as ColorPreset,
     sound: 'hearth' as AmbientSoundType,
     blur: 10,
     dim: 55,
@@ -162,9 +156,8 @@ const VIBE_PRESETS = [
     id: 'tokyo-pack',
     name: 'Tokyo Lo-Fi Drizzle',
     desc: 'Rainy neon crosswalk with gentle drizzle & cyberpunk neon accents',
-    url: GALLERY_WALLPAPERS[3].url,
+    url: GALLERY_WALLPAPERS[4].url,
     effect: 'rain' as WeatherEffect,
-    color: 'neon' as ColorPreset,
     sound: 'rain' as AmbientSoundType,
     blur: 8,
     dim: 55,
@@ -173,27 +166,14 @@ const VIBE_PRESETS = [
     id: 'vinyl-pack',
     name: 'Analog Vinyl Lounge',
     desc: 'Warm turntable gear with subtle scanlines & obsidian emerald accents',
-    url: GALLERY_WALLPAPERS[5].url,
+    url: GALLERY_WALLPAPERS[6].url,
     effect: 'scanlines' as WeatherEffect,
-    color: 'dark' as ColorPreset,
     sound: 'off' as AmbientSoundType,
     blur: 12,
     dim: 65,
   },
-  {
-    id: 'cosmos-pack',
-    name: 'Deep Space Starfield',
-    desc: 'Starlight nebula with floating cosmic dust & oceanic aqua accents',
-    url: GALLERY_WALLPAPERS[6].url,
-    effect: 'snow' as WeatherEffect,
-    color: 'aqua' as ColorPreset,
-    sound: 'off' as AmbientSoundType,
-    blur: 12,
-    dim: 50,
-  },
 ];
 
-// C. Ambient Background Audio Streams (Layered softly under Spotify)
 const AMBIENT_SOUND_URLS: Record<AmbientSoundType, string> = {
   off: '',
   rain: 'https://assets.mixkit.co/active_storage/sfx/1253/1253-preview.mp3',
@@ -201,7 +181,6 @@ const AMBIENT_SOUND_URLS: Record<AmbientSoundType, string> = {
   wind: 'https://assets.mixkit.co/active_storage/sfx/1271/1271-preview.mp3',
 };
 
-// D. Color Palette Styling Tokens
 const THEME_CLASSES: Record<
   ColorPreset,
   {
@@ -296,7 +275,7 @@ export default function HomePage() {
   // SECTION 3: COMPONENT STATE
   // ============================================================================
   
-  // A. View & Theme State
+  // A. View & Theme State (Default: Dark Obsidian)
   const [layout, setLayout] = useState<LayoutPreset>('studio');
   const [colorTheme, setColorTheme] = useState<ColorPreset>('dark');
   const [atmoMode, setAtmoMode] = useState<AtmosphereMode>('presets');
@@ -304,7 +283,7 @@ export default function HomePage() {
 
   // B. Wallpaper & Camera State
   const [bgMode, setBgMode] = useState<BgMode>('gallery');
-  const [selectedGalleryUrl, setSelectedGalleryUrl] = useState(GALLERY_WALLPAPERS[1].url);
+  const [selectedGalleryUrl, setSelectedGalleryUrl] = useState(GALLERY_WALLPAPERS[0].url);
   const [bgCustomUrl, setBgCustomUrl] = useState('');
   const [bgBlur, setBgBlur] = useState<number>(8);
   const [bgDim, setBgDim] = useState<number>(45);
@@ -312,7 +291,7 @@ export default function HomePage() {
   const [bgScale, setBgScale] = useState<number>(105);
 
   // C. Real-Time Weather & Soundscape State
-  const [weatherFx, setWeatherFx] = useState<WeatherEffect>('snow');
+  const [weatherFx, setWeatherFx] = useState<WeatherEffect>('none');
   const [fxDensity, setFxDensity] = useState<number>(50);
   const [fxSpeed, setFxSpeed] = useState<number>(50);
   const [ambientSound, setAmbientSound] = useState<AmbientSoundType>('off');
@@ -382,19 +361,20 @@ export default function HomePage() {
     const savedLayout = (localStorage.getItem('trackdeck_layout') as LayoutPreset) || 'studio';
     setLayout(savedLayout === 'studio' || savedLayout === 'cinema' ? savedLayout : 'studio');
 
+    // Default to dark/obsidian — never force light mode!
     const savedColor = (localStorage.getItem('trackdeck_color_theme') as ColorPreset) || 'dark';
     setColorTheme(savedColor);
 
     const savedBgMode = (localStorage.getItem('trackdeck_bg_mode') as BgMode) || 'gallery';
     setBgMode(savedBgMode);
 
-    const savedGalleryUrl = localStorage.getItem('trackdeck_bg_gallery') || GALLERY_WALLPAPERS[1].url;
+    const savedGalleryUrl = localStorage.getItem('trackdeck_bg_gallery') || GALLERY_WALLPAPERS[0].url;
     setSelectedGalleryUrl(savedGalleryUrl);
 
     const savedBgCustom = localStorage.getItem('trackdeck_bg_custom') || '';
     setBgCustomUrl(savedBgCustom);
 
-    const savedFx = (localStorage.getItem('trackdeck_weather_fx') as WeatherEffect) || 'snow';
+    const savedFx = (localStorage.getItem('trackdeck_weather_fx') as WeatherEffect) || 'none';
     setWeatherFx(savedFx);
 
     const savedDensity = Number(localStorage.getItem('trackdeck_fx_density') ?? 50);
@@ -555,14 +535,20 @@ export default function HomePage() {
   // ============================================================================
   useEffect(() => {
     const canvas = canvasRef.current;
-    if (!canvas || weatherFx === 'none' || weatherFx === 'scanlines') return;
-
+    if (!canvas) return;
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    let animId: number;
     let width = (canvas.width = window.innerWidth);
     let height = (canvas.height = window.innerHeight);
+
+    // CRITICAL: Clear canvas completely when weather is 'none' or 'scanlines'
+    if (weatherFx === 'none' || weatherFx === 'scanlines') {
+      ctx.clearRect(0, 0, width, height);
+      return;
+    }
+
+    let animId: number;
 
     const handleResize = () => {
       if (!canvas) return;
@@ -574,7 +560,7 @@ export default function HomePage() {
     const densityMult = fxDensity / 50;
     const speedMult = fxSpeed / 50;
 
-    // A. Snow Particles (Multi-Layer Parallax Simulation)
+    // A. Snow Particles
     interface Snowflake {
       x: number;
       y: number;
@@ -593,7 +579,6 @@ export default function HomePage() {
     for (let i = 0; i < totalFlakes; i++) {
       const rand = Math.random();
       if (rand < 0.65) {
-        // Far background micro-dust
         snowFlakes.push({
           x: Math.random() * width,
           y: Math.random() * height,
@@ -606,7 +591,6 @@ export default function HomePage() {
           layer: 'far',
         });
       } else if (rand < 0.9) {
-        // Midground natural flakes
         snowFlakes.push({
           x: Math.random() * width,
           y: Math.random() * height,
@@ -619,7 +603,6 @@ export default function HomePage() {
           layer: 'mid',
         });
       } else {
-        // Foreground soft bokeh circles
         snowFlakes.push({
           x: Math.random() * width,
           y: Math.random() * height,
@@ -667,7 +650,7 @@ export default function HomePage() {
       ctx.clearRect(0, 0, width, height);
       timeTick += 0.01;
 
-      // Render Snow
+      // 1. Render Snow (Realistic Parallax)
       if (weatherFx === 'snow') {
         const wind = Math.sin(timeTick * 0.3) * 0.4 + 0.15;
         for (const f of snowFlakes) {
@@ -700,7 +683,7 @@ export default function HomePage() {
         }
       }
 
-      // Render Thunderstorm Flash
+      // 2. Render Thunderstorm Flash (Pure ambient glow)
       if (weatherFx === 'thunderstorm') {
         const now = Date.now();
         if (now > nextLightning) {
@@ -714,7 +697,7 @@ export default function HomePage() {
         }
       }
 
-      // Render Rain
+      // 3. Render Rain
       if (weatherFx === 'rain' || weatherFx === 'thunderstorm') {
         ctx.strokeStyle = 'rgba(255, 255, 255, 0.4)';
         ctx.lineWidth = 1.1;
@@ -736,7 +719,7 @@ export default function HomePage() {
         }
       }
 
-      // Render Embers
+      // 4. Render Embers
       if (weatherFx === 'embers') {
         for (const p of generalParticles) {
           ctx.beginPath();
@@ -916,7 +899,7 @@ export default function HomePage() {
   }
 
   // ============================================================================
-  // SECTION 7: SPOTIFY PLAYBACK ACTIONS (PLAY, NEXT, SEEK, QUEUE)
+  // SECTION 7: SPOTIFY PLAYBACK ACTIONS
   // ============================================================================
 
   async function togglePlay() {
@@ -1138,7 +1121,7 @@ export default function HomePage() {
   }
 
   // ============================================================================
-  // SECTION 9: CHAMELEON REALITY & WEATHER FX CONTROLLERS
+  // SECTION 9: CHAMELEON REALITY & WEATHER CONTROLLERS
   // ============================================================================
 
   async function applyChameleonReality() {
@@ -1146,18 +1129,17 @@ export default function HomePage() {
     const report = await detectLocalWeather();
     setLocalWeather(report);
 
+    // Apply real wallpaper matching weather
     setBgMode('gallery');
     setSelectedGalleryUrl(report.recommendedBgUrl);
-    setWeatherFx(report.effect);
-    setColorTheme(report.isDay ? 'light' : 'dark');
-    setBgDim(report.isDay ? 30 : 55);
+    setWeatherFx(report.effect); // Sets to 'none' if clear sky!
+    setBgDim(50);
     setBgBlur(8);
 
+    // CRITICAL: We do NOT force light mode! Maintain sleek dark glass HUD.
     localStorage.setItem('trackdeck_bg_mode', 'gallery');
     localStorage.setItem('trackdeck_bg_gallery', report.recommendedBgUrl);
     localStorage.setItem('trackdeck_weather_fx', report.effect);
-    localStorage.setItem('trackdeck_color_theme', report.isDay ? 'light' : 'dark');
-    localStorage.setItem('trackdeck_bg_dim', String(report.isDay ? 30 : 55));
     setIsDetectingWeather(false);
   }
 
@@ -1165,15 +1147,14 @@ export default function HomePage() {
     setBgMode('gallery');
     setSelectedGalleryUrl(preset.url);
     setWeatherFx(preset.effect);
-    setColorTheme(preset.color);
     setAmbientSound(preset.sound);
     setBgBlur(preset.blur);
     setBgDim(preset.dim);
 
+    // Presets do NOT lock your color scheme—you keep your custom button colors!
     localStorage.setItem('trackdeck_bg_mode', 'gallery');
     localStorage.setItem('trackdeck_bg_gallery', preset.url);
     localStorage.setItem('trackdeck_weather_fx', preset.effect);
-    localStorage.setItem('trackdeck_color_theme', preset.color);
     localStorage.setItem('trackdeck_bg_blur', String(preset.blur));
     localStorage.setItem('trackdeck_bg_dim', String(preset.dim));
   }
@@ -1314,8 +1295,8 @@ export default function HomePage() {
       <header
         className={`relative z-30 h-12 border-b px-5 flex items-center justify-between shrink-0 backdrop-blur-2xl transition-colors duration-300 ${theme.topBar}`}
       >
-        {/* Left Side: AI Status & Device Selector */}
         <div className="flex items-center gap-2">
+          {/* AI Status */}
           <button
             onClick={() => setShowSettingsModal(true)}
             className={`text-[11px] font-medium px-3 py-1 rounded-full border transition-all flex items-center gap-1.5 ${
@@ -1328,6 +1309,7 @@ export default function HomePage() {
             <span>{geminiKey ? 'Copilot Active' : 'Connect AI'}</span>
           </button>
 
+          {/* Device Selector Pill */}
           <button
             onClick={() => {
               loadDevices();
@@ -1356,8 +1338,9 @@ export default function HomePage() {
           )}
         </div>
 
-        {/* Right Side: Atmosphere, Settings, Logout */}
+        {/* Right Actions */}
         <div className="flex items-center gap-1.5">
+          {/* Atmosphere Palette Button */}
           <button
             onClick={() => setShowAtmosphereModal(true)}
             title="Atmosphere Studio & FX"
@@ -1366,6 +1349,7 @@ export default function HomePage() {
             <Palette className="w-4 h-4 text-emerald-500" />
           </button>
 
+          {/* Settings Gear */}
           <button
             onClick={() => setShowSettingsModal(true)}
             title="Settings"
@@ -1374,6 +1358,7 @@ export default function HomePage() {
             <Settings className="w-4 h-4 opacity-70 hover:opacity-100" />
           </button>
 
+          {/* Account Logout */}
           {isAuthenticated && (
             <button
               onClick={handleLogout}
@@ -1778,10 +1763,8 @@ export default function HomePage() {
       </div>
 
       {/* ==================================================================== */}
-      {/* SECTION 11: MODALS                                                   */}
+      {/* SECTION 11: ATMOSPHERE STUDIO (PRESETS + UNLOCKED DECK BUILDER)       */}
       {/* ==================================================================== */}
-
-      {/* 11.A: ATMOSPHERE & WEATHER STUDIO MODAL */}
       {showAtmosphereModal && (
         <div className="fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex items-center justify-center p-4">
           <div className={`w-full max-w-xl rounded-3xl p-6 shadow-2xl space-y-5 border max-h-[90vh] flex flex-col ${theme.modal}`}>
@@ -1790,12 +1773,48 @@ export default function HomePage() {
                 <Palette className="w-5 h-5 text-emerald-500" />
                 <div>
                   <h3 className="font-bold text-sm">Atmosphere & Deck Customizer</h3>
-                  <p className="text-[10px] opacity-60">Pick a ready-to-use vibe or build your own custom UI from scratch</p>
+                  <p className="text-[10px] opacity-60">Pick a ready-to-use vibe or customize your own deck</p>
                 </div>
               </div>
               <button onClick={() => setShowAtmosphereModal(false)} className="opacity-50 hover:opacity-100 p-1">
                 <X className="w-4 h-4" />
               </button>
+            </div>
+
+            {/* TOP BAR IN MODAL: ACCENT PALETTES (ALWAYS ACCESSIBLE!) */}
+            <div className="space-y-1.5 border-b pb-3 border-inherit shrink-0">
+              <div className="flex items-center justify-between text-[11px] font-mono uppercase tracking-wider opacity-60">
+                <span>Deck Button & Accent Colors</span>
+                <span>Active: {colorTheme.toUpperCase()}</span>
+              </div>
+              <div className="grid grid-cols-6 gap-1.5">
+                {(['dark', 'neon', 'aqua', 'amber', 'oled', 'light'] as ColorPreset[]).map((c) => (
+                  <button
+                    key={c}
+                    onClick={() => changeColorTheme(c)}
+                    className={`py-1.5 px-2 rounded-xl border text-[10px] font-bold capitalize flex items-center justify-center gap-1 transition-all ${
+                      colorTheme === c ? 'border-emerald-500 bg-emerald-500/20' : 'border-white/10 hover:border-white/30'
+                    }`}
+                  >
+                    <span
+                      className={`w-2 h-2 rounded-full ${
+                        c === 'dark'
+                          ? 'bg-emerald-500'
+                          : c === 'neon'
+                          ? 'bg-pink-500'
+                          : c === 'aqua'
+                          ? 'bg-cyan-400'
+                          : c === 'amber'
+                          ? 'bg-amber-500'
+                          : c === 'oled'
+                          ? 'bg-white'
+                          : 'bg-zinc-300'
+                      }`}
+                    />
+                    {c}
+                  </button>
+                ))}
+              </div>
             </div>
 
             {/* Mode Switcher */}
@@ -1814,7 +1833,7 @@ export default function HomePage() {
                   atmoMode === 'custom_builder' ? theme.accentBtn : 'opacity-70 hover:opacity-100'
                 }`}
               >
-                <Sliders className="w-3.5 h-3.5" /> Build Custom UI (From Scratch)
+                <Sliders className="w-3.5 h-3.5" /> Custom Deck Builder
               </button>
             </div>
 
@@ -1830,7 +1849,7 @@ export default function HomePage() {
                         <Compass className="w-4 h-4" /> Chameleon Reality (Live Weather & Clock Sync)
                       </p>
                       <p className="text-[11px] opacity-70 mt-1 max-w-sm">
-                        Automatically detects local rain, storms, snow, or clear skies, and mirrors day/night lighting.
+                        Automatically detects local rain, storms, snow, or sunny skies, and syncs reality.
                       </p>
                       {localWeather && (
                         <p className="text-[10px] font-mono text-zinc-400 mt-1">
@@ -2105,7 +2124,7 @@ export default function HomePage() {
                         onClick={() => changeWeatherFx('none')}
                         className={`p-2 rounded-xl border text-xs font-semibold ${weatherFx === 'none' ? 'border-emerald-500 bg-emerald-500/10' : 'border-white/10'}`}
                       >
-                        None
+                        None (Clear)
                       </button>
                       <button
                         onClick={() => changeWeatherFx('rain')}
@@ -2182,10 +2201,10 @@ export default function HomePage() {
                     )}
                   </div>
 
-                  {/* Step 4: Layout & Colors */}
+                  {/* Step 4: Layout View */}
                   <div className="space-y-3 border-t pt-4 border-inherit">
                     <label className="text-[11px] font-mono uppercase tracking-wider opacity-70 flex items-center gap-1.5 font-bold">
-                      <LayoutGrid className="w-3.5 h-3.5 text-emerald-500" /> 4. Layout Mode & Accent Colors
+                      <LayoutGrid className="w-3.5 h-3.5 text-emerald-500" /> 4. Layout Mode
                     </label>
 
                     <div className="grid grid-cols-2 gap-2">
@@ -2204,57 +2223,6 @@ export default function HomePage() {
                         }`}
                       >
                         <Maximize2 className="w-3.5 h-3.5" /> Cinema Focus
-                      </button>
-                    </div>
-
-                    <div className="grid grid-cols-3 gap-2 pt-1">
-                      <button
-                        onClick={() => changeColorTheme('dark')}
-                        className={`p-2 rounded-xl border flex items-center gap-2 text-xs font-semibold ${
-                          colorTheme === 'dark' ? 'border-emerald-500 bg-emerald-500/10' : 'border-white/10'
-                        }`}
-                      >
-                        <span className="w-3 h-3 rounded-full bg-emerald-500 shrink-0" /> Obsidian
-                      </button>
-                      <button
-                        onClick={() => changeColorTheme('light')}
-                        className={`p-2 rounded-xl border flex items-center gap-2 text-xs font-semibold ${
-                          colorTheme === 'light' ? 'border-emerald-500 bg-emerald-500/10' : 'border-white/10'
-                        }`}
-                      >
-                        <span className="w-3 h-3 rounded-full bg-zinc-200 border border-zinc-400 shrink-0" /> Pearl Light
-                      </button>
-                      <button
-                        onClick={() => changeColorTheme('neon')}
-                        className={`p-2 rounded-xl border flex items-center gap-2 text-xs font-semibold ${
-                          colorTheme === 'neon' ? 'border-pink-500 bg-pink-500/10' : 'border-white/10'
-                        }`}
-                      >
-                        <span className="w-3 h-3 rounded-full bg-pink-500 shrink-0" /> Cyber Neon
-                      </button>
-                      <button
-                        onClick={() => changeColorTheme('aqua')}
-                        className={`p-2 rounded-xl border flex items-center gap-2 text-xs font-semibold ${
-                          colorTheme === 'aqua' ? 'border-cyan-400 bg-cyan-400/10' : 'border-white/10'
-                        }`}
-                      >
-                        <span className="w-3 h-3 rounded-full bg-cyan-400 shrink-0" /> Ocean Aqua
-                      </button>
-                      <button
-                        onClick={() => changeColorTheme('amber')}
-                        className={`p-2 rounded-xl border flex items-center gap-2 text-xs font-semibold ${
-                          colorTheme === 'amber' ? 'border-amber-500 bg-amber-500/10' : 'border-white/10'
-                        }`}
-                      >
-                        <span className="w-3 h-3 rounded-full bg-amber-500 shrink-0" /> Sunset Amber
-                      </button>
-                      <button
-                        onClick={() => changeColorTheme('oled')}
-                        className={`p-2 rounded-xl border flex items-center gap-2 text-xs font-semibold ${
-                          colorTheme === 'oled' ? 'border-white bg-white/10' : 'border-white/10'
-                        }`}
-                      >
-                        <span className="w-3 h-3 rounded-full bg-black border border-white shrink-0" /> OLED Zero
                       </button>
                     </div>
                   </div>
