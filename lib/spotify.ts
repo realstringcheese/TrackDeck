@@ -1,4 +1,4 @@
-// Spotify PKCE, Playlists, Queue & Devices Client (School-Bypass Tunnel + Safe Auth)
+// Spotify PKCE & Proxy Client
 
 const CLIENT_ID = process.env.NEXT_PUBLIC_SPOTIFY_CLIENT_ID || '';
 const SCOPES = [
@@ -13,7 +13,6 @@ export async function redirectToSpotifyAuth(customClientId?: string) {
   try {
     let clientId = customClientId || CLIENT_ID || localStorage.getItem('spotify_client_id') || '';
 
-    // If client ID is missing on a new PC, prompt the user instead of freezing silently
     if (!clientId.trim()) {
       clientId = prompt('Please paste your Spotify Client ID to log in:') || '';
     }
@@ -46,41 +45,47 @@ export async function redirectToSpotifyAuth(customClientId?: string) {
       scope: SCOPES,
     });
 
-    // Navigate to Spotify's official login page
     window.location.href = `https://accounts.spotify.com/authorize?${params.toString()}`;
   } catch (err: unknown) {
-    console.error('Redirect to Spotify failed:', err);
+    console.error('Redirect failed:', err);
     alert('Spotify login error: ' + (err instanceof Error ? err.message : String(err)));
   }
 }
 
+// Proxied through /api/spotify so school Wi-Fi cannot block code exchange
 export async function handleAuthCallback(code: string): Promise<boolean> {
   const verifier = localStorage.getItem('pkce_verifier') || '';
   const clientId = localStorage.getItem('spotify_client_id') || CLIENT_ID;
   const redirectUri = `${window.location.origin}/callback`;
 
-  const payload = new URLSearchParams({
-    client_id: clientId,
-    grant_type: 'authorization_code',
-    code,
-    redirect_uri: redirectUri,
-    code_verifier: verifier,
-  });
+  try {
+    const res = await fetch('/api/spotify', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        type: 'token_exchange',
+        code,
+        verifier,
+        clientId,
+        redirectUri,
+      }),
+    });
 
-  const res = await fetch('https://accounts.spotify.com/api/token', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: payload.toString(),
-  }).catch(() => null);
+    if (!res.ok) return false;
+    const data = await res.json();
 
-  if (!res || !res.ok) return false;
-  const data = await res.json();
+    if (data.access_token) {
+      localStorage.setItem('spotify_access_token', data.access_token);
+      localStorage.setItem('spotify_refresh_token', data.refresh_token || '');
+      localStorage.setItem('spotify_token_expires', (Date.now() + (data.expires_in || 3600) * 1000).toString());
+      localStorage.removeItem('pkce_verifier');
+      return true;
+    }
+  } catch (e) {
+    console.error('Auth exchange failed', e);
+  }
 
-  localStorage.setItem('spotify_access_token', data.access_token);
-  localStorage.setItem('spotify_refresh_token', data.refresh_token);
-  localStorage.setItem('spotify_token_expires', (Date.now() + data.expires_in * 1000).toString());
-  localStorage.removeItem('pkce_verifier');
-  return true;
+  return false;
 }
 
 export async function getAccessToken(): Promise<string | null> {
@@ -92,7 +97,7 @@ export async function getAccessToken(): Promise<string | null> {
 
   if (!token) return null;
 
-  // Auto-refresh token through Vercel cloud tunnel before expiration
+  // Refresh token through Vercel cloud tunnel before expiration
   if (Date.now() > expires - 60000 && refreshToken) {
     try {
       const res = await fetch('/api/spotify', {
@@ -109,19 +114,22 @@ export async function getAccessToken(): Promise<string | null> {
         const data = await res.json();
         if (data.access_token) {
           localStorage.setItem('spotify_access_token', data.access_token);
-          localStorage.setItem('spotify_token_expires', (Date.now() + data.expires_in * 1000).toString());
+          localStorage.setItem('spotify_token_expires', (Date.now() + (data.expires_in || 3600) * 1000).toString());
           return data.access_token;
         }
+      } else {
+        // If refresh failed, session is dead: clear it
+        localStorage.removeItem('spotify_access_token');
+        return null;
       }
-    } catch (e) {
-      console.warn('Proxy token refresh failed', e);
+    } catch {
+      return null;
     }
   }
 
   return token;
 }
 
-// Proxies all Spotify API calls through /api/spotify cloud tunnel
 export async function spotifyFetch(endpoint: string, options: RequestInit = {}) {
   const token = await getAccessToken();
   if (!token) return null;
@@ -138,10 +146,14 @@ export async function spotifyFetch(endpoint: string, options: RequestInit = {}) 
       }),
     });
 
-    if (res.status === 204) return { success: true };
-    if (!res.ok) {
+    if (res.status === 204) return null;
+    if (res.status === 401) {
+      // Token expired/revoked: clear zombie session
+      localStorage.removeItem('spotify_access_token');
       return null;
     }
+
+    if (!res.ok) return null;
 
     return await res.json();
   } catch (err) {

@@ -17,11 +17,12 @@ export default function CallbackPage() {
         if (success) {
           router.replace('/');
         } else {
-          setStatus('Authentication failed. Please return to the homepage and try again.');
+          setStatus('Authentication failed. Returning home...');
+          setTimeout(() => router.replace('/'), 2000);
         }
       });
     } else {
-      setStatus('No authorization code found in URL.');
+      router.replace('/');
     }
   }, [router]);
 
