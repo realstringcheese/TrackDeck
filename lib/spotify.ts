@@ -1,6 +1,6 @@
-// Spotify PKCE, Playlists, Queue & Devices Client (School-Bypass Tunnel Version)
+// Spotify PKCE, Playlists, Queue & Devices Client (School-Bypass Tunnel + Safe Auth)
 
-const CLIENT_ID = '2c255d9ae9b94e25a57b7552082fe460';
+const CLIENT_ID = process.env.NEXT_PUBLIC_SPOTIFY_CLIENT_ID || '';
 const SCOPES = [
   'user-read-playback-state',
   'user-modify-playback-state',
@@ -10,32 +10,48 @@ const SCOPES = [
 ].join(' ');
 
 export async function redirectToSpotifyAuth(customClientId?: string) {
-  const clientId = customClientId || CLIENT_ID || localStorage.getItem('spotify_client_id') || '';
-  if (!clientId) throw new Error('Missing Spotify Client ID');
-  localStorage.setItem('spotify_client_id', clientId);
+  try {
+    let clientId = customClientId || CLIENT_ID || localStorage.getItem('spotify_client_id') || '';
 
-  const verifier = generateRandomString(64);
-  localStorage.setItem('pkce_verifier', verifier);
+    // If client ID is missing on a new PC, prompt the user instead of freezing silently
+    if (!clientId.trim()) {
+      clientId = prompt('Please paste your Spotify Client ID to log in:') || '';
+    }
 
-  const hashed = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(verifier));
-  const bytes = new Uint8Array(hashed);
-  let binary = '';
-  for (let i = 0; i < bytes.byteLength; i++) {
-    binary += String.fromCharCode(bytes[i]);
+    if (!clientId.trim()) {
+      alert('Cannot connect without a Spotify Client ID.');
+      return;
+    }
+
+    localStorage.setItem('spotify_client_id', clientId.trim());
+
+    const verifier = generateRandomString(64);
+    localStorage.setItem('pkce_verifier', verifier);
+
+    const hashed = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(verifier));
+    const bytes = new Uint8Array(hashed);
+    let binary = '';
+    for (let i = 0; i < bytes.byteLength; i++) {
+      binary += String.fromCharCode(bytes[i]);
+    }
+
+    const challenge = btoa(binary).replace(/=/g, '').replace(/\+/g, '-').replace(/\//g, '_');
+    const redirectUri = `${window.location.origin}/callback`;
+    const params = new URLSearchParams({
+      client_id: clientId.trim(),
+      response_type: 'code',
+      redirect_uri: redirectUri,
+      code_challenge_method: 'S256',
+      code_challenge: challenge,
+      scope: SCOPES,
+    });
+
+    // Navigate to Spotify's official login page
+    window.location.href = `https://accounts.spotify.com/authorize?${params.toString()}`;
+  } catch (err: unknown) {
+    console.error('Redirect to Spotify failed:', err);
+    alert('Spotify login error: ' + (err instanceof Error ? err.message : String(err)));
   }
-
-  const challenge = btoa(binary).replace(/=/g, '').replace(/\+/g, '-').replace(/\//g, '_');
-  const redirectUri = `${window.location.origin}/callback`;
-  const params = new URLSearchParams({
-    client_id: clientId,
-    response_type: 'code',
-    redirect_uri: redirectUri,
-    code_challenge_method: 'S256',
-    code_challenge: challenge,
-    scope: SCOPES,
-  });
-
-  window.location.href = `https://accounts.spotify.com/authorize?${params.toString()}`;
 }
 
 export async function handleAuthCallback(code: string): Promise<boolean> {
@@ -51,7 +67,6 @@ export async function handleAuthCallback(code: string): Promise<boolean> {
     code_verifier: verifier,
   });
 
-  // Call through Vercel proxy if possible, or direct
   const res = await fetch('https://accounts.spotify.com/api/token', {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
@@ -68,7 +83,6 @@ export async function handleAuthCallback(code: string): Promise<boolean> {
   return true;
 }
 
-// Token refresh runs through the Vercel cloud tunnel to bypass school blocks
 export async function getAccessToken(): Promise<string | null> {
   if (typeof window === 'undefined') return null;
   const token = localStorage.getItem('spotify_access_token');
@@ -78,7 +92,7 @@ export async function getAccessToken(): Promise<string | null> {
 
   if (!token) return null;
 
-  // Refresh token 60 seconds before expiration
+  // Auto-refresh token through Vercel cloud tunnel before expiration
   if (Date.now() > expires - 60000 && refreshToken) {
     try {
       const res = await fetch('/api/spotify', {
@@ -107,7 +121,7 @@ export async function getAccessToken(): Promise<string | null> {
   return token;
 }
 
-// Proxies all Spotify API calls through /api/spotify
+// Proxies all Spotify API calls through /api/spotify cloud tunnel
 export async function spotifyFetch(endpoint: string, options: RequestInit = {}) {
   const token = await getAccessToken();
   if (!token) return null;
@@ -126,14 +140,12 @@ export async function spotifyFetch(endpoint: string, options: RequestInit = {}) 
 
     if (res.status === 204) return { success: true };
     if (!res.ok) {
-      const err = await res.text();
-      console.warn(`Tunnel error on ${endpoint}:`, err);
       return null;
     }
 
     return await res.json();
   } catch (err) {
-    console.warn(`Network failure on ${endpoint} (School Wi-Fi blocked direct):`, err);
+    console.warn(`Network error on ${endpoint}:`, err);
     return null;
   }
 }

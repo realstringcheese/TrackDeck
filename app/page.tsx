@@ -80,7 +80,7 @@ type AtmosphereMode = 'presets' | 'custom_builder';
 type AmbientSoundType = 'off' | 'rain' | 'hearth' | 'wind';
 
 // ============================================================================
-// SECTION 2: CONFIGURATION & PRESET DATA
+// SECTION 2: CONFIGURATION & PRESETS DATA
 // ============================================================================
 
 const GALLERY_WALLPAPERS = [
@@ -199,8 +199,8 @@ const THEME_CLASSES: Record<
   dark: {
     root: 'bg-[#07080b] text-zinc-100',
     topBar: 'bg-[#040507]/90 border-white/[0.05] text-white',
-    panel: 'bg-black/40 text-zinc-100 border-white/[0.05]',
-    border: 'border-white/[0.05]',
+    panel: 'bg-black/65 text-zinc-100 border-white/10',
+    border: 'border-white/[0.08]',
     accentBtn: 'bg-emerald-500 hover:bg-emerald-400 text-black shadow-emerald-500/20',
     accentText: 'text-emerald-500',
     scrubBg: 'bg-white/[0.08] hover:bg-white/[0.14]',
@@ -211,7 +211,7 @@ const THEME_CLASSES: Record<
   light: {
     root: 'bg-[#f4f5f8] text-zinc-900',
     topBar: 'bg-white/80 border-zinc-200/80 text-zinc-900 shadow-sm',
-    panel: 'bg-white/70 text-zinc-900 border-zinc-200/80 shadow-sm',
+    panel: 'bg-white/80 text-zinc-900 border-zinc-200/90 shadow-lg',
     border: 'border-zinc-200/80',
     accentBtn: 'bg-emerald-500 hover:bg-emerald-400 text-black shadow-emerald-500/10',
     accentText: 'text-emerald-600',
@@ -223,7 +223,7 @@ const THEME_CLASSES: Record<
   neon: {
     root: 'bg-[#0a0518] text-pink-50',
     topBar: 'bg-[#070212]/90 border-pink-500/20 text-white',
-    panel: 'bg-[#120826]/60 text-pink-50 border-pink-500/20 shadow-pink-950/20',
+    panel: 'bg-[#120826]/75 text-pink-50 border-pink-500/30 shadow-pink-950/30',
     border: 'border-pink-500/20',
     accentBtn: 'bg-gradient-to-r from-pink-500 to-rose-500 hover:from-pink-400 hover:to-rose-400 text-white shadow-pink-500/30',
     accentText: 'text-cyan-400',
@@ -235,7 +235,7 @@ const THEME_CLASSES: Record<
   aqua: {
     root: 'bg-[#040d1a] text-cyan-50',
     topBar: 'bg-[#02070e]/90 border-cyan-500/20 text-white',
-    panel: 'bg-[#081b33]/60 text-cyan-50 border-cyan-500/20 shadow-cyan-950/20',
+    panel: 'bg-[#081b33]/75 text-cyan-50 border-cyan-500/30 shadow-cyan-950/30',
     border: 'border-cyan-500/20',
     accentBtn: 'bg-gradient-to-r from-cyan-400 to-teal-400 hover:from-cyan-300 hover:to-teal-300 text-black shadow-cyan-500/30',
     accentText: 'text-cyan-400',
@@ -247,7 +247,7 @@ const THEME_CLASSES: Record<
   amber: {
     root: 'bg-[#100a06] text-amber-50',
     topBar: 'bg-[#090503]/90 border-amber-500/20 text-white',
-    panel: 'bg-[#1a0f07]/60 text-amber-50 border-amber-500/20 shadow-amber-950/20',
+    panel: 'bg-[#1a0f07]/75 text-amber-50 border-amber-500/30 shadow-amber-950/30',
     border: 'border-amber-500/20',
     accentBtn: 'bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 text-black shadow-amber-500/30',
     accentText: 'text-amber-400',
@@ -259,8 +259,8 @@ const THEME_CLASSES: Record<
   oled: {
     root: 'bg-[#000000] text-white',
     topBar: 'bg-[#000000] border-zinc-800 text-white',
-    panel: 'bg-[#000000] text-white border-zinc-850',
-    border: 'border-zinc-850',
+    panel: 'bg-[#080808] text-white border-zinc-800',
+    border: 'border-zinc-800',
     accentBtn: 'bg-white hover:bg-zinc-200 text-black shadow-white/10',
     accentText: 'text-zinc-400',
     scrubBg: 'bg-zinc-900 hover:bg-zinc-800',
@@ -274,14 +274,12 @@ export default function HomePage() {
   // ============================================================================
   // SECTION 3: COMPONENT STATE
   // ============================================================================
-  
-  // A. View & Theme State (Default: Dark Obsidian)
   const [layout, setLayout] = useState<LayoutPreset>('studio');
   const [colorTheme, setColorTheme] = useState<ColorPreset>('dark');
   const [atmoMode, setAtmoMode] = useState<AtmosphereMode>('presets');
   const [centerMode, setCenterMode] = useState<'deck' | 'lyrics'>('deck');
 
-  // B. Wallpaper & Camera State
+  // Wallpaper & Framing
   const [bgMode, setBgMode] = useState<BgMode>('gallery');
   const [selectedGalleryUrl, setSelectedGalleryUrl] = useState(GALLERY_WALLPAPERS[0].url);
   const [bgCustomUrl, setBgCustomUrl] = useState('');
@@ -290,7 +288,7 @@ export default function HomePage() {
   const [bgPosY, setBgPosY] = useState<number>(50);
   const [bgScale, setBgScale] = useState<number>(105);
 
-  // C. Real-Time Weather & Soundscape State
+  // Weather & Sound
   const [weatherFx, setWeatherFx] = useState<WeatherEffect>('none');
   const [fxDensity, setFxDensity] = useState<number>(50);
   const [fxSpeed, setFxSpeed] = useState<number>(50);
@@ -299,7 +297,7 @@ export default function HomePage() {
   const [localWeather, setLocalWeather] = useState<LocalWeatherReport | null>(null);
   const [isDetectingWeather, setIsDetectingWeather] = useState(false);
 
-  // D. Spotify Playback & Track Info
+  // Spotify Playback & Track
   const [isAuthenticated, setIsAuthenticated] = useState<boolean | null>(null);
   const [spotifyClientId, setSpotifyClientId] = useState('');
   const [playback, setPlayback] = useState<{
@@ -315,7 +313,7 @@ export default function HomePage() {
     lastSyncTime: number;
   } | null>(null);
 
-  // E. Devices, Playlists & Queue
+  // Devices & Collections
   const [devices, setDevices] = useState<SpotifyDevice[]>([]);
   const [playlists, setPlaylists] = useState<Playlist[]>([]);
   const [selectedPlaylist, setSelectedPlaylist] = useState<Playlist | null>(null);
@@ -326,7 +324,7 @@ export default function HomePage() {
   const [currentLyricIdx, setCurrentLyricIdx] = useState<number>(-1);
   const [sonicDna, setSonicDna] = useState<{ bpm: number; key: string; energy: number } | null>(null);
 
-  // F. AI Copilot Chat State
+  // AI Copilot
   const [geminiKey, setGeminiKey] = useState<string>('');
   const [keyInput, setKeyInput] = useState('');
   const [messages, setMessages] = useState<ChatMessage[]>([
@@ -338,13 +336,13 @@ export default function HomePage() {
   const [chatInput, setChatInput] = useState('');
   const [isAiLoading, setIsAiLoading] = useState(false);
 
-  // G. Modals Visibility
+  // Modals Visibility
   const [showSpotifyModal, setShowSpotifyModal] = useState(false);
   const [showSettingsModal, setShowSettingsModal] = useState(false);
   const [showDevicesModal, setShowDevicesModal] = useState(false);
   const [showAtmosphereModal, setShowAtmosphereModal] = useState(false);
 
-  // H. Refs
+  // Refs
   const activeDeviceId = useRef<string | null>(null);
   const isActionPending = useRef(false);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -356,12 +354,10 @@ export default function HomePage() {
   // SECTION 4: LIFECYCLE & BACKGROUND PROCESSES
   // ============================================================================
 
-  // 1. Initial Load & LocalStorage Hydration
   useEffect(() => {
     const savedLayout = (localStorage.getItem('trackdeck_layout') as LayoutPreset) || 'studio';
     setLayout(savedLayout === 'studio' || savedLayout === 'cinema' ? savedLayout : 'studio');
 
-    // Default to dark/obsidian — never force light mode!
     const savedColor = (localStorage.getItem('trackdeck_color_theme') as ColorPreset) || 'dark';
     setColorTheme(savedColor);
 
@@ -405,6 +401,7 @@ export default function HomePage() {
       '';
     setSpotifyClientId(savedClientId);
 
+    // Hydrate cached song so UI never shows blank on load
     const cached = localStorage.getItem('trackdeck_cached_track');
     if (cached) {
       try {
@@ -429,7 +426,7 @@ export default function HomePage() {
     detectLocalWeather().then(setLocalWeather);
   }, []);
 
-  // 2. Background Polling (Playback & Queue)
+  // Polling
   useEffect(() => {
     if (!isAuthenticated) return;
     const interval = setInterval(fetchNowPlaying, 1500);
@@ -442,7 +439,7 @@ export default function HomePage() {
     return () => clearInterval(interval);
   }, [isAuthenticated]);
 
-  // 3. Sub-Second Smooth Progress Ticker
+  // Scrub Bar Ticking
   useEffect(() => {
     if (!playback?.isPlaying) return;
     const timer = setInterval(() => {
@@ -460,7 +457,7 @@ export default function HomePage() {
     return () => clearInterval(timer);
   }, [playback?.isPlaying]);
 
-  // 4. Ambient Audio Synthesizer Controller
+  // Ambient Audio
   useEffect(() => {
     if (!ambientAudioRef.current) return;
     ambientAudioRef.current.volume = ambientVolume / 100;
@@ -471,7 +468,7 @@ export default function HomePage() {
     }
   }, [ambientSound, ambientVolume]);
 
-  // 5. Track Metadata Change: Fetch Lyrics & Sonic DNA
+  // Fetch Lyrics & Sonic DNA
   useEffect(() => {
     if (!playback?.name || !playback?.artist) return;
 
@@ -502,7 +499,7 @@ export default function HomePage() {
     }
   }, [playback?.name, playback?.artist, playback?.id]);
 
-  // 6. Real-Time Karaoke Lyrics Scroller
+  // Karaoke Lyrics Scroller
   useEffect(() => {
     if (!lyrics || !playback?.progressMs) return;
     const curTime = playback.progressMs;
@@ -525,13 +522,12 @@ export default function HomePage() {
     }
   }, [playback?.progressMs, lyrics, currentLyricIdx]);
 
-  // 7. Auto-scroll chat to bottom
   useEffect(() => {
     chatBottomRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
   // ============================================================================
-  // SECTION 5: REAL-TIME 2D CANVAS WEATHER SHADER ENGINE
+  // SECTION 5: CANVAS WEATHER ENGINE (WIPES COMPLETELY ON 'NONE')
   // ============================================================================
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -542,7 +538,7 @@ export default function HomePage() {
     let width = (canvas.width = window.innerWidth);
     let height = (canvas.height = window.innerHeight);
 
-    // CRITICAL: Clear canvas completely when weather is 'none' or 'scanlines'
+    // CRITICAL: Clean canvas wipe when effect is none or scanlines
     if (weatherFx === 'none' || weatherFx === 'scanlines') {
       ctx.clearRect(0, 0, width, height);
       return;
@@ -560,7 +556,6 @@ export default function HomePage() {
     const densityMult = fxDensity / 50;
     const speedMult = fxSpeed / 50;
 
-    // A. Snow Particles
     interface Snowflake {
       x: number;
       y: number;
@@ -617,7 +612,6 @@ export default function HomePage() {
       }
     }
 
-    // B. Rain, Storm & Ember Particles
     interface GeneralParticle {
       x: number;
       y: number;
@@ -650,7 +644,7 @@ export default function HomePage() {
       ctx.clearRect(0, 0, width, height);
       timeTick += 0.01;
 
-      // 1. Render Snow (Realistic Parallax)
+      // 1. Realistic Snow
       if (weatherFx === 'snow') {
         const wind = Math.sin(timeTick * 0.3) * 0.4 + 0.15;
         for (const f of snowFlakes) {
@@ -683,7 +677,7 @@ export default function HomePage() {
         }
       }
 
-      // 2. Render Thunderstorm Flash (Pure ambient glow)
+      // 2. Thunderstorm Flash
       if (weatherFx === 'thunderstorm') {
         const now = Date.now();
         if (now > nextLightning) {
@@ -697,7 +691,7 @@ export default function HomePage() {
         }
       }
 
-      // 3. Render Rain
+      // 3. Rain
       if (weatherFx === 'rain' || weatherFx === 'thunderstorm') {
         ctx.strokeStyle = 'rgba(255, 255, 255, 0.4)';
         ctx.lineWidth = 1.1;
@@ -719,7 +713,7 @@ export default function HomePage() {
         }
       }
 
-      // 4. Render Embers
+      // 4. Embers
       if (weatherFx === 'embers') {
         for (const p of generalParticles) {
           ctx.beginPath();
@@ -891,6 +885,7 @@ export default function HomePage() {
           return fresh;
         });
       } else {
+        // If phone paused, do NOT wipe to blank! Keep cached track and mark paused
         setPlayback((prev) => (prev ? { ...prev, isPlaying: false } : null));
       }
     } catch (e) {
@@ -1129,14 +1124,13 @@ export default function HomePage() {
     const report = await detectLocalWeather();
     setLocalWeather(report);
 
-    // Apply real wallpaper matching weather
     setBgMode('gallery');
     setSelectedGalleryUrl(report.recommendedBgUrl);
     setWeatherFx(report.effect); // Sets to 'none' if clear sky!
     setBgDim(50);
     setBgBlur(8);
 
-    // CRITICAL: We do NOT force light mode! Maintain sleek dark glass HUD.
+    // CRITICAL: We maintain sleek dark glass HUD. Never force white light mode!
     localStorage.setItem('trackdeck_bg_mode', 'gallery');
     localStorage.setItem('trackdeck_bg_gallery', report.recommendedBgUrl);
     localStorage.setItem('trackdeck_weather_fx', report.effect);
@@ -1151,7 +1145,6 @@ export default function HomePage() {
     setBgBlur(preset.blur);
     setBgDim(preset.dim);
 
-    // Presets do NOT lock your color scheme—you keep your custom button colors!
     localStorage.setItem('trackdeck_bg_mode', 'gallery');
     localStorage.setItem('trackdeck_bg_gallery', preset.url);
     localStorage.setItem('trackdeck_weather_fx', preset.effect);
@@ -1242,7 +1235,6 @@ export default function HomePage() {
     <div
       className={`h-screen w-screen overflow-hidden flex flex-col font-sans select-none transition-colors duration-500 ${theme.root}`}
     >
-      {/* Background Audio Synthesizer */}
       <audio
         ref={ambientAudioRef}
         src={AMBIENT_SOUND_URLS[ambientSound]}
@@ -1251,7 +1243,7 @@ export default function HomePage() {
       />
 
       {/* ---------------------------------------------------------------------- */}
-      {/* 10.A: BACKGROUND WALLPAPER & CANVAS SHADERS                            */}
+      {/* 10.A: BACKGROUND & WEATHER CANVAS (Z-0: STRICTLY BEHIND ALL UI)         */}
       {/* ---------------------------------------------------------------------- */}
       {activeBgImage && (
         <div className="fixed inset-0 pointer-events-none z-0 overflow-hidden">
@@ -1275,11 +1267,12 @@ export default function HomePage() {
             }}
           />
 
-          <canvas ref={canvasRef} className="absolute inset-0 pointer-events-none" />
+          {/* Canvas Shader strictly at z-0 */}
+          <canvas ref={canvasRef} className="absolute inset-0 pointer-events-none z-0" />
 
           {weatherFx === 'scanlines' && (
             <div
-              className="absolute inset-0 pointer-events-none opacity-20"
+              className="absolute inset-0 pointer-events-none opacity-20 z-0"
               style={{
                 backgroundImage: 'linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.45) 50%)',
                 backgroundSize: '100% 4px',
@@ -1340,7 +1333,6 @@ export default function HomePage() {
 
         {/* Right Actions */}
         <div className="flex items-center gap-1.5">
-          {/* Atmosphere Palette Button */}
           <button
             onClick={() => setShowAtmosphereModal(true)}
             title="Atmosphere Studio & FX"
@@ -1349,7 +1341,6 @@ export default function HomePage() {
             <Palette className="w-4 h-4 text-emerald-500" />
           </button>
 
-          {/* Settings Gear */}
           <button
             onClick={() => setShowSettingsModal(true)}
             title="Settings"
@@ -1358,7 +1349,6 @@ export default function HomePage() {
             <Settings className="w-4 h-4 opacity-70 hover:opacity-100" />
           </button>
 
-          {/* Account Logout */}
           {isAuthenticated && (
             <button
               onClick={handleLogout}
@@ -1381,7 +1371,7 @@ export default function HomePage() {
         {/* ==================================================================== */}
         {layout === 'studio' && (
           <aside
-            className={`h-full w-64 border-r backdrop-blur-2xl flex flex-col shrink-0 overflow-hidden transition-all duration-300 ${theme.panel}`}
+            className={`h-full w-64 border-r backdrop-blur-2xl flex flex-col shrink-0 overflow-hidden transition-all duration-300 z-10 ${theme.panel}`}
           >
             <div className={`p-3.5 border-b flex items-center justify-between min-h-[44px] ${theme.border}`}>
               {selectedPlaylist ? (
@@ -1401,7 +1391,6 @@ export default function HomePage() {
 
             <div className="flex-1 overflow-y-auto p-2 space-y-1.5 no-scrollbar">
               {selectedPlaylist ? (
-                /* Inspector View */
                 <div className="space-y-3">
                   <div className="text-center p-2">
                     <img
@@ -1450,7 +1439,6 @@ export default function HomePage() {
                   </div>
                 </div>
               ) : (
-                /* List View */
                 playlists.map((pl) => (
                   <div
                     key={pl.id}
@@ -1476,18 +1464,18 @@ export default function HomePage() {
         )}
 
         {/* ==================================================================== */}
-        {/* CENTER COLUMN: PLAYER DECK + SYNCED LYRICS + AI CHAT                 */}
+        {/* CENTER COLUMN: PROTECTED FROSTED PLAYER DECK CARD (NO FX ON BUTTONS) */}
         {/* ==================================================================== */}
         <main
-          className={`flex-1 flex flex-col justify-between overflow-hidden transition-all duration-500 ${
+          className={`flex-1 flex flex-col justify-between overflow-hidden transition-all duration-500 z-10 ${
             layout === 'cinema' ? 'px-8 py-6 max-w-4xl mx-auto' : 'px-6 py-4'
           }`}
         >
-          {/* Top Half: Living Deck vs Apple Music-style Synced Lyrics */}
+          {/* Top Half: Protected Frosted Card */}
           <div className="flex-1 flex flex-col items-center justify-center min-h-0 relative">
             
-            {/* View Mode Toggle: [ 💿 Album ] vs [ 🎤 Lyrics ] */}
-            <div className="absolute top-2 right-4 z-20 flex items-center gap-1 bg-black/30 border border-white/10 rounded-xl p-1">
+            {/* View Mode Switcher: [ 💿 Deck ] vs [ 🎤 Lyrics ] */}
+            <div className="absolute top-2 right-4 z-20 flex items-center gap-1 bg-black/40 border border-white/10 rounded-xl p-1 shadow-md">
               <button
                 onClick={() => setCenterMode('deck')}
                 className={`p-1.5 rounded-lg text-xs transition-colors ${
@@ -1508,20 +1496,18 @@ export default function HomePage() {
               </button>
             </div>
 
-            {/* View A: The Living Deck */}
+            {/* A. LIVING DECK: HOUSED IN A FROSTED GLASS SHIELD */}
             {centerMode === 'deck' ? (
               <div
-                className={`flex flex-col items-center text-center transition-all duration-500 ${
-                  layout === 'cinema' ? 'w-full max-w-lg' : 'w-full max-w-md'
-                }`}
+                className={`w-full max-w-md p-6 rounded-3xl border shadow-2xl backdrop-blur-3xl flex flex-col items-center text-center transition-all duration-500 z-10 ${theme.panel}`}
               >
                 {/* Album Art Showcase */}
                 <div
-                  className={`relative aspect-square rounded-3xl overflow-hidden border shadow-2xl mb-4 group flex items-center justify-center transition-all duration-500 ${
+                  className={`relative aspect-square rounded-2xl overflow-hidden border shadow-2xl mb-4 group flex items-center justify-center transition-all duration-500 ${
                     layout === 'cinema'
-                      ? 'w-64 md:w-80 shadow-[0_25px_60px_rgba(0,0,0,0.9)]'
-                      : 'w-56 md:w-64'
-                  } ${theme.panel}`}
+                      ? 'w-60 md:w-72 shadow-[0_25px_60px_rgba(0,0,0,0.9)]'
+                      : 'w-52 md:w-56'
+                  } bg-black/40 border-white/10`}
                 >
                   {playback?.albumArt ? (
                     <img
@@ -1536,9 +1522,9 @@ export default function HomePage() {
                       {devices.length > 0 && (
                         <button
                           onClick={() => handleTransferDevice(devices[0].id)}
-                          className={`mt-2 px-3 py-1 text-[11px] font-bold rounded-full transition-all ${theme.accentBtn}`}
+                          className={`mt-2 px-3 py-1.5 text-[11px] font-bold rounded-full transition-all ${theme.accentBtn}`}
                         >
-                          Wake Up {devices[0].name}
+                          📱 Wake Up {devices[0].name}
                         </button>
                       )}
                     </div>
@@ -1546,7 +1532,7 @@ export default function HomePage() {
                 </div>
 
                 {/* Track Title & Artist */}
-                <div className="space-y-0.5 px-4 mb-2 w-full">
+                <div className="space-y-0.5 px-2 mb-2 w-full">
                   <h2
                     className={`font-bold truncate tracking-tight transition-all ${
                       layout === 'cinema' ? 'text-2xl' : 'text-lg'
@@ -1589,7 +1575,7 @@ export default function HomePage() {
                   </div>
                 </div>
 
-                {/* Media Controls */}
+                {/* Media Controls (Protected from Background FX) */}
                 <div className="flex items-center justify-center gap-8">
                   <button
                     onClick={handlePrev}
@@ -1619,11 +1605,11 @@ export default function HomePage() {
                 </div>
               </div>
             ) : (
-              /* View B: Synced Karaoke Lyrics */
-              <div className="w-full max-w-xl h-full flex flex-col items-center justify-center p-4 overflow-hidden">
+              /* B. Synced Karaoke Lyrics (In Protected Frosted Shield) */
+              <div className={`w-full max-w-xl h-full flex flex-col items-center justify-center p-6 rounded-3xl border shadow-2xl backdrop-blur-3xl overflow-hidden z-10 ${theme.panel}`}>
                 <div
                   ref={lyricsContainerRef}
-                  className="w-full h-[320px] overflow-y-auto space-y-5 text-center no-scrollbar pr-2 py-16"
+                  className="w-full h-[300px] overflow-y-auto space-y-5 text-center no-scrollbar pr-2 py-16"
                 >
                   {lyrics === null ? (
                     <div className="h-full flex flex-col items-center justify-center opacity-50 space-y-2">
@@ -1673,7 +1659,7 @@ export default function HomePage() {
 
           {/* Bottom Half: Wide AI Copilot Chat Bar */}
           <div
-            className={`w-full mx-auto border rounded-2xl backdrop-blur-2xl flex flex-col justify-between p-3 shrink-0 shadow-lg h-[20vh] max-w-3xl transition-all duration-300 ${theme.panel}`}
+            className={`w-full mx-auto border rounded-2xl backdrop-blur-3xl flex flex-col justify-between p-3 shrink-0 shadow-lg h-[20vh] max-w-3xl transition-all duration-300 z-10 ${theme.panel}`}
           >
             <div className="flex-1 overflow-y-auto space-y-1.5 pr-2 text-xs">
               {messages.map((m, i) => (
@@ -1722,7 +1708,7 @@ export default function HomePage() {
         {/* ==================================================================== */}
         {layout === 'studio' && (
           <aside
-            className={`h-full w-64 border-l backdrop-blur-2xl flex flex-col shrink-0 overflow-hidden transition-all duration-300 ${theme.panel}`}
+            className={`h-full w-64 border-l backdrop-blur-2xl flex flex-col shrink-0 overflow-hidden transition-all duration-300 z-10 ${theme.panel}`}
           >
             <div className={`p-3.5 border-b flex items-center justify-between min-h-[44px] ${theme.border}`}>
               <h2 className="text-xs font-mono uppercase tracking-wider font-semibold opacity-70">
@@ -1763,8 +1749,10 @@ export default function HomePage() {
       </div>
 
       {/* ==================================================================== */}
-      {/* SECTION 11: ATMOSPHERE STUDIO (PRESETS + UNLOCKED DECK BUILDER)       */}
+      {/* SECTION 11: MODALS                                                   */}
       {/* ==================================================================== */}
+
+      {/* 11.A: ATMOSPHERE & WEATHER STUDIO MODAL */}
       {showAtmosphereModal && (
         <div className="fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex items-center justify-center p-4">
           <div className={`w-full max-w-xl rounded-3xl p-6 shadow-2xl space-y-5 border max-h-[90vh] flex flex-col ${theme.modal}`}>
@@ -1773,7 +1761,7 @@ export default function HomePage() {
                 <Palette className="w-5 h-5 text-emerald-500" />
                 <div>
                   <h3 className="font-bold text-sm">Atmosphere & Deck Customizer</h3>
-                  <p className="text-[10px] opacity-60">Pick a ready-to-use vibe or customize your own deck</p>
+                  <p className="text-[10px] opacity-60">Pick a ready-to-use vibe or build your own custom UI from scratch</p>
                 </div>
               </div>
               <button onClick={() => setShowAtmosphereModal(false)} className="opacity-50 hover:opacity-100 p-1">
@@ -1781,7 +1769,7 @@ export default function HomePage() {
               </button>
             </div>
 
-            {/* TOP BAR IN MODAL: ACCENT PALETTES (ALWAYS ACCESSIBLE!) */}
+            {/* UNLOCKED ACCENT COLOR PALETTES (Always available) */}
             <div className="space-y-1.5 border-b pb-3 border-inherit shrink-0">
               <div className="flex items-center justify-between text-[11px] font-mono uppercase tracking-wider opacity-60">
                 <span>Deck Button & Accent Colors</span>
@@ -1849,7 +1837,7 @@ export default function HomePage() {
                         <Compass className="w-4 h-4" /> Chameleon Reality (Live Weather & Clock Sync)
                       </p>
                       <p className="text-[11px] opacity-70 mt-1 max-w-sm">
-                        Automatically detects local rain, storms, snow, or sunny skies, and syncs reality.
+                        Automatically detects local rain, storms, snow, or sunny skies, and mirrors day/night lighting without forcing white mode.
                       </p>
                       {localWeather && (
                         <p className="text-[10px] font-mono text-zinc-400 mt-1">
@@ -2030,7 +2018,6 @@ export default function HomePage() {
                       <Sliders className="w-3.5 h-3.5 text-emerald-500" /> 2. Wallpaper Camera & Focus Sliders
                     </label>
 
-                    {/* Blur Slider */}
                     <div className="space-y-1">
                       <div className="flex justify-between text-xs">
                         <span>Blur Intensity</span>
@@ -2050,7 +2037,6 @@ export default function HomePage() {
                       />
                     </div>
 
-                    {/* Dimming Slider */}
                     <div className="space-y-1">
                       <div className="flex justify-between text-xs">
                         <span>Dark Tint (Contrast with HUD)</span>
@@ -2070,7 +2056,6 @@ export default function HomePage() {
                       />
                     </div>
 
-                    {/* Vertical Crop Slider */}
                     <div className="space-y-1">
                       <div className="flex justify-between text-xs">
                         <span>Vertical Crop Position</span>
@@ -2092,7 +2077,6 @@ export default function HomePage() {
                       />
                     </div>
 
-                    {/* Zoom / Scale Slider */}
                     <div className="space-y-1">
                       <div className="flex justify-between text-xs">
                         <span>Zoom / Scale</span>
@@ -2401,6 +2385,23 @@ export default function HomePage() {
               <p className="text-xs text-zinc-400 mt-1">
                 Log in to control your phone's Spotify wirelessly with custom atmosphere.
               </p>
+            </div>
+
+            {/* Always visible Client ID input with auto-save */}
+            <div className="text-left space-y-1">
+              <label className="text-[10px] font-mono uppercase tracking-wider text-zinc-400">
+                Spotify Client ID
+              </label>
+              <input
+                type="text"
+                value={spotifyClientId}
+                onChange={(e) => {
+                  setSpotifyClientId(e.target.value);
+                  localStorage.setItem('spotify_client_id', e.target.value.trim());
+                }}
+                placeholder="Paste your Spotify Client ID..."
+                className="w-full bg-black/60 border border-white/10 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-emerald-500 font-mono"
+              />
             </div>
 
             <button
