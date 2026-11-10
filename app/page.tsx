@@ -2403,21 +2403,6 @@ export default function HomePage() {
               </p>
             </div>
 
-            {!process.env.NEXT_PUBLIC_SPOTIFY_CLIENT_ID && (
-              <div className="text-left space-y-1">
-                <label className="text-[10px] font-mono uppercase tracking-wider text-zinc-400">
-                  Spotify Client ID
-                </label>
-                <input
-                  type="text"
-                  value={spotifyClientId}
-                  onChange={(e) => setSpotifyClientId(e.target.value)}
-                  placeholder="Paste Spotify Client ID..."
-                  className="w-full bg-black/60 border border-white/10 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-emerald-500 font-mono"
-                />
-              </div>
-            )}
-
             <button
               onClick={() => redirectToSpotifyAuth(spotifyClientId)}
               className="w-full py-3 bg-[#1DB954] hover:bg-[#1ed760] text-black font-bold rounded-2xl text-xs tracking-wide uppercase transition-all shadow-lg shadow-emerald-500/20 flex items-center justify-center gap-2 hover:scale-[1.02] active:scale-[0.98]"
