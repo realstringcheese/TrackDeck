@@ -1302,6 +1302,18 @@ export default function HomePage() {
             <span>{geminiKey ? 'Copilot Active' : 'Connect AI'}</span>
           </button>
 
+          {/* Re-Open Spotify Modal if Logged Out */}
+          {!isAuthenticated && (
+            <button
+              onClick={() => setShowSpotifyModal(true)}
+              className="text-[11px] font-bold px-3 py-1 rounded-full bg-[#1DB954] hover:bg-[#1ed760] text-black transition-colors flex items-center gap-1 shadow-sm"
+              title="Connect Spotify Account"
+            >
+              <Music2 className="w-3 h-3 fill-current" />
+              <span>Connect</span>
+            </button>
+          )}
+
           {/* Device Selector Pill */}
           <button
             onClick={() => {
@@ -2372,10 +2384,28 @@ export default function HomePage() {
         </div>
       )}
 
-      {/* 11.D: SPOTIFY AUTHENTICATION MODAL */}
+      {/* ==================================================================== */}
+      {/* 11.D: SPOTIFY AUTHENTICATION MODAL (NOW WITH EXIT & GUEST MODE)      */}
+      {/* ==================================================================== */}
       {showSpotifyModal && (
-        <div className="fixed inset-0 bg-black/85 backdrop-blur-md z-50 flex items-center justify-center p-4">
-          <div className="bg-[#0c0d12] border border-white/10 w-full max-w-md rounded-3xl p-7 shadow-2xl text-center space-y-5 text-white">
+        <div
+          onClick={(e) => {
+            // Click outside the box to close
+            if (e.target === e.currentTarget) setShowSpotifyModal(false);
+          }}
+          className="fixed inset-0 bg-black/85 backdrop-blur-md z-50 flex items-center justify-center p-4 cursor-pointer"
+        >
+          <div className="bg-[#0c0d12] border border-white/10 w-full max-w-md rounded-3xl p-7 shadow-2xl text-center space-y-5 text-white relative cursor-default">
+            {/* 1. TOP EXIT BUTTON (✕) */}
+            <button
+              onClick={() => setShowSpotifyModal(false)}
+              className="absolute top-4 right-4 p-2 text-zinc-400 hover:text-white rounded-full hover:bg-white/10 transition-colors"
+              title="Close and explore deck"
+            >
+              <X className="w-5 h-5" />
+            </button>
+
+            {/* Logo & Header */}
             <div className="w-14 h-14 bg-emerald-500/10 border border-emerald-500/30 text-emerald-500 rounded-2xl mx-auto flex items-center justify-center">
               <Disc3 className="w-7 h-7 animate-[spin_8s_linear_infinite]" />
             </div>
@@ -2387,7 +2417,7 @@ export default function HomePage() {
               </p>
             </div>
 
-            {/* Always visible Client ID input with auto-save */}
+            {/* Client ID Input */}
             <div className="text-left space-y-1">
               <label className="text-[10px] font-mono uppercase tracking-wider text-zinc-400">
                 Spotify Client ID
@@ -2404,6 +2434,7 @@ export default function HomePage() {
               />
             </div>
 
+            {/* Connect Button */}
             <button
               onClick={() => redirectToSpotifyAuth(spotifyClientId)}
               className="w-full py-3 bg-[#1DB954] hover:bg-[#1ed760] text-black font-bold rounded-2xl text-xs tracking-wide uppercase transition-all shadow-lg shadow-emerald-500/20 flex items-center justify-center gap-2 hover:scale-[1.02] active:scale-[0.98]"
@@ -2411,9 +2442,16 @@ export default function HomePage() {
               <Music2 className="w-4 h-4 fill-current" />
               Continue with Spotify
             </button>
+
+            {/* 2. GUEST / DEMO MODE BUTTON */}
+            <div className="pt-2 border-t border-white/10">
+              <button
+                onClick={() => setShowSpotifyModal(false)}
+                className="text-xs text-zinc-400 hover:text-zinc-200 underline transition-colors"
+              >
+                Skip for now & explore deck as Guest
+              </button>
+            </div>
           </div>
         </div>
       )}
-    </div>
-  );
-}
