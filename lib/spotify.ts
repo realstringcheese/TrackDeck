@@ -1,6 +1,6 @@
 // Spotify PKCE, Playlists, Queue & Devices Client (School-Bypass Tunnel Version)
 
-const CLIENT_ID = 'YOUR_ACTUAL_SPOTIFY_CLIENT_ID_HERE';
+const CLIENT_ID = '2c255d9ae9b94e25a57b7552082fe460';
 const SCOPES = [
   'user-read-playback-state',
   'user-modify-playback-state',
