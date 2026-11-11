@@ -1,7 +1,7 @@
 'use client';
 
 // ============================================================================
-// SECTION 1: IMPORTS & TYPES
+// SECTION 1: IMPORTS & INTERFACES (ALL TYPES MOVED TO TOP LEVEL)
 // ============================================================================
 import { useState, useEffect, useRef } from 'react';
 import {
@@ -72,6 +72,28 @@ interface SpotifyDevice {
   is_active: boolean;
 }
 
+interface SnowParticle {
+  x: number;
+  y: number;
+  radius: number;
+  speedY: number;
+  swing: number;
+  angle: number;
+  angularSpeed: number;
+  alpha: number;
+  layer: 'far' | 'mid' | 'bokeh';
+}
+
+interface GeneralParticle {
+  x: number;
+  y: number;
+  l: number;
+  xs: number;
+  ys: number;
+  size: number;
+  opacity: number;
+}
+
 type LayoutPreset = 'studio' | 'cinema';
 type ColorPreset = 'dark' | 'light' | 'neon' | 'aqua' | 'amber' | 'oled';
 type BgMode = 'album' | 'gallery' | 'custom';
@@ -80,7 +102,7 @@ type AtmosphereMode = 'presets' | 'custom_builder';
 type AmbientSoundType = 'off' | 'rain' | 'hearth' | 'wind';
 
 // ============================================================================
-// SECTION 2: CONFIGURATION & PRESETS DATA
+// SECTION 2: CONFIGURATION & PRESET DATA
 // ============================================================================
 
 const GALLERY_WALLPAPERS = [
@@ -401,7 +423,6 @@ export default function HomePage() {
       '';
     setSpotifyClientId(savedClientId);
 
-    // Hydrate cached song so UI never shows blank on load
     const cached = localStorage.getItem('trackdeck_cached_track');
     if (cached) {
       try {
@@ -439,7 +460,7 @@ export default function HomePage() {
     return () => clearInterval(interval);
   }, [isAuthenticated]);
 
-  // Scrub Bar Ticking
+  // Scrub Ticking
   useEffect(() => {
     if (!playback?.isPlaying) return;
     const timer = setInterval(() => {
@@ -457,7 +478,7 @@ export default function HomePage() {
     return () => clearInterval(timer);
   }, [playback?.isPlaying]);
 
-  // Ambient Audio
+  // Ambient Audio Player Sync
   useEffect(() => {
     if (!ambientAudioRef.current) return;
     ambientAudioRef.current.volume = ambientVolume / 100;
@@ -468,7 +489,7 @@ export default function HomePage() {
     }
   }, [ambientSound, ambientVolume]);
 
-  // Fetch Lyrics & Sonic DNA
+  // Fetch Synced Lyrics & Sonic DNA
   useEffect(() => {
     if (!playback?.name || !playback?.artist) return;
 
@@ -527,7 +548,7 @@ export default function HomePage() {
   }, [messages]);
 
   // ============================================================================
-  // SECTION 5: CANVAS WEATHER ENGINE (WIPES COMPLETELY ON 'NONE')
+  // SECTION 5: CANVAS WEATHER ENGINE
   // ============================================================================
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -538,7 +559,6 @@ export default function HomePage() {
     let width = (canvas.width = window.innerWidth);
     let height = (canvas.height = window.innerHeight);
 
-    // CRITICAL: Clean canvas wipe when effect is none or scanlines
     if (weatherFx === 'none' || weatherFx === 'scanlines') {
       ctx.clearRect(0, 0, width, height);
       return;
@@ -556,19 +576,7 @@ export default function HomePage() {
     const densityMult = fxDensity / 50;
     const speedMult = fxSpeed / 50;
 
-    interface Snowflake {
-      x: number;
-      y: number;
-      radius: number;
-      speedY: number;
-      swing: number;
-      angle: number;
-      angularSpeed: number;
-      alpha: number;
-      layer: 'far' | 'mid' | 'bokeh';
-    }
-
-    const snowFlakes: Snowflake[] = [];
+    const snowFlakes: SnowParticle[] = [];
     const totalFlakes = Math.floor(180 * densityMult);
 
     for (let i = 0; i < totalFlakes; i++) {
@@ -612,16 +620,6 @@ export default function HomePage() {
       }
     }
 
-    interface GeneralParticle {
-      x: number;
-      y: number;
-      l: number;
-      xs: number;
-      ys: number;
-      size: number;
-      opacity: number;
-    }
-
     const generalParticles: GeneralParticle[] = [];
     const count = Math.floor(100 * densityMult);
     for (let i = 0; i < count; i++) {
@@ -644,7 +642,6 @@ export default function HomePage() {
       ctx.clearRect(0, 0, width, height);
       timeTick += 0.01;
 
-      // 1. Realistic Snow
       if (weatherFx === 'snow') {
         const wind = Math.sin(timeTick * 0.3) * 0.4 + 0.15;
         for (const f of snowFlakes) {
@@ -677,7 +674,6 @@ export default function HomePage() {
         }
       }
 
-      // 2. Thunderstorm Flash
       if (weatherFx === 'thunderstorm') {
         const now = Date.now();
         if (now > nextLightning) {
@@ -691,7 +687,6 @@ export default function HomePage() {
         }
       }
 
-      // 3. Rain
       if (weatherFx === 'rain' || weatherFx === 'thunderstorm') {
         ctx.strokeStyle = 'rgba(255, 255, 255, 0.4)';
         ctx.lineWidth = 1.1;
@@ -713,7 +708,6 @@ export default function HomePage() {
         }
       }
 
-      // 4. Embers
       if (weatherFx === 'embers') {
         for (const p of generalParticles) {
           ctx.beginPath();
@@ -885,7 +879,6 @@ export default function HomePage() {
           return fresh;
         });
       } else {
-        // If phone paused, do NOT wipe to blank! Keep cached track and mark paused
         setPlayback((prev) => (prev ? { ...prev, isPlaying: false } : null));
       }
     } catch (e) {
@@ -948,8 +941,7 @@ export default function HomePage() {
     const rect = e.currentTarget.getBoundingClientRect();
     const ratio = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
     const newPosMs = Math.floor(ratio * playback.durationMs);
-    const deviceId = await resolveTargetDevice();
-    const devParam = deviceId ? `?device_id=${deviceId}` : '';
+    const devParam = activeDeviceId.current ? `?device_id=${activeDeviceId.current}` : '';
 
     isActionPending.current = true;
     setPlayback((prev) => (prev ? { ...prev, progressMs: newPosMs, lastSyncTime: Date.now() } : null));
@@ -1126,11 +1118,10 @@ export default function HomePage() {
 
     setBgMode('gallery');
     setSelectedGalleryUrl(report.recommendedBgUrl);
-    setWeatherFx(report.effect); // Sets to 'none' if clear sky!
+    setWeatherFx(report.effect);
     setBgDim(50);
     setBgBlur(8);
 
-    // CRITICAL: We maintain sleek dark glass HUD. Never force white light mode!
     localStorage.setItem('trackdeck_bg_mode', 'gallery');
     localStorage.setItem('trackdeck_bg_gallery', report.recommendedBgUrl);
     localStorage.setItem('trackdeck_weather_fx', report.effect);
@@ -1243,7 +1234,7 @@ export default function HomePage() {
       />
 
       {/* ---------------------------------------------------------------------- */}
-      {/* 10.A: BACKGROUND & WEATHER CANVAS (Z-0: STRICTLY BEHIND ALL UI)         */}
+      {/* 10.A: BACKGROUND & WEATHER CANVAS (Z-0)                                */}
       {/* ---------------------------------------------------------------------- */}
       {activeBgImage && (
         <div className="fixed inset-0 pointer-events-none z-0 overflow-hidden">
@@ -1267,7 +1258,6 @@ export default function HomePage() {
             }}
           />
 
-          {/* Canvas Shader strictly at z-0 */}
           <canvas ref={canvasRef} className="absolute inset-0 pointer-events-none z-0" />
 
           {weatherFx === 'scanlines' && (
@@ -1302,18 +1292,6 @@ export default function HomePage() {
             <span>{geminiKey ? 'Copilot Active' : 'Connect AI'}</span>
           </button>
 
-          {/* Re-Open Spotify Modal if Logged Out */}
-          {!isAuthenticated && (
-            <button
-              onClick={() => setShowSpotifyModal(true)}
-              className="text-[11px] font-bold px-3 py-1 rounded-full bg-[#1DB954] hover:bg-[#1ed760] text-black transition-colors flex items-center gap-1 shadow-sm"
-              title="Connect Spotify Account"
-            >
-              <Music2 className="w-3 h-3 fill-current" />
-              <span>Connect</span>
-            </button>
-          )}
-
           {/* Device Selector Pill */}
           <button
             onClick={() => {
@@ -1345,6 +1323,19 @@ export default function HomePage() {
 
         {/* Right Actions */}
         <div className="flex items-center gap-1.5">
+          {/* Re-Open Spotify Modal if Logged Out */}
+          {!isAuthenticated && (
+            <button
+              onClick={() => setShowSpotifyModal(true)}
+              className="text-[11px] font-bold px-3 py-1 rounded-full bg-[#1DB954] hover:bg-[#1ed760] text-black transition-colors flex items-center gap-1 shadow-sm"
+              title="Connect Spotify Account"
+            >
+              <Music2 className="w-3 h-3 fill-current" />
+              <span>Connect</span>
+            </button>
+          )}
+
+          {/* Atmosphere Studio Button */}
           <button
             onClick={() => setShowAtmosphereModal(true)}
             title="Atmosphere Studio & FX"
@@ -1353,6 +1344,7 @@ export default function HomePage() {
             <Palette className="w-4 h-4 text-emerald-500" />
           </button>
 
+          {/* Settings Gear */}
           <button
             onClick={() => setShowSettingsModal(true)}
             title="Settings"
@@ -1361,6 +1353,7 @@ export default function HomePage() {
             <Settings className="w-4 h-4 opacity-70 hover:opacity-100" />
           </button>
 
+          {/* Account Logout */}
           {isAuthenticated && (
             <button
               onClick={handleLogout}
@@ -1378,9 +1371,7 @@ export default function HomePage() {
       {/* ---------------------------------------------------------------------- */}
       <div className="relative z-10 flex-1 flex overflow-hidden">
         
-        {/* ==================================================================== */}
-        {/* LEFT COLUMN: PLAYLISTS & TRACKLIST INSPECTOR                         */}
-        {/* ==================================================================== */}
+        {/* LEFT COLUMN: PLAYLISTS */}
         {layout === 'studio' && (
           <aside
             className={`h-full w-64 border-r backdrop-blur-2xl flex flex-col shrink-0 overflow-hidden transition-all duration-300 z-10 ${theme.panel}`}
@@ -1475,18 +1466,16 @@ export default function HomePage() {
           </aside>
         )}
 
-        {/* ==================================================================== */}
-        {/* CENTER COLUMN: PROTECTED FROSTED PLAYER DECK CARD (NO FX ON BUTTONS) */}
-        {/* ==================================================================== */}
+        {/* CENTER COLUMN: PROTECTED FROSTED PLAYER DECK CARD */}
         <main
           className={`flex-1 flex flex-col justify-between overflow-hidden transition-all duration-500 z-10 ${
             layout === 'cinema' ? 'px-8 py-6 max-w-4xl mx-auto' : 'px-6 py-4'
           }`}
         >
-          {/* Top Half: Protected Frosted Card */}
+          {/* Top Half: Frosted Deck Shield vs Synced Lyrics */}
           <div className="flex-1 flex flex-col items-center justify-center min-h-0 relative">
             
-            {/* View Mode Switcher: [ 💿 Deck ] vs [ 🎤 Lyrics ] */}
+            {/* View Mode Switcher */}
             <div className="absolute top-2 right-4 z-20 flex items-center gap-1 bg-black/40 border border-white/10 rounded-xl p-1 shadow-md">
               <button
                 onClick={() => setCenterMode('deck')}
@@ -1508,7 +1497,7 @@ export default function HomePage() {
               </button>
             </div>
 
-            {/* A. LIVING DECK: HOUSED IN A FROSTED GLASS SHIELD */}
+            {/* A. LIVING DECK: HOUSED IN A SOLID FROSTED GLASS SHIELD */}
             {centerMode === 'deck' ? (
               <div
                 className={`w-full max-w-md p-6 rounded-3xl border shadow-2xl backdrop-blur-3xl flex flex-col items-center text-center transition-all duration-500 z-10 ${theme.panel}`}
@@ -1557,7 +1546,7 @@ export default function HomePage() {
                   </p>
                 </div>
 
-                {/* Sonic DNA Badge (BPM, Key, Energy %) */}
+                {/* Sonic DNA Badge */}
                 {sonicDna && (
                   <div className="flex items-center gap-2 text-[10px] font-mono opacity-70 bg-white/5 border border-white/10 px-2.5 py-1 rounded-full mb-3">
                     <Activity className="w-3 h-3 text-emerald-400" />
@@ -1587,7 +1576,7 @@ export default function HomePage() {
                   </div>
                 </div>
 
-                {/* Media Controls (Protected from Background FX) */}
+                {/* Media Controls */}
                 <div className="flex items-center justify-center gap-8">
                   <button
                     onClick={handlePrev}
@@ -1617,7 +1606,7 @@ export default function HomePage() {
                 </div>
               </div>
             ) : (
-              /* B. Synced Karaoke Lyrics (In Protected Frosted Shield) */
+              /* B. Synced Karaoke Lyrics (Protected Frosted Shield) */
               <div className={`w-full max-w-xl h-full flex flex-col items-center justify-center p-6 rounded-3xl border shadow-2xl backdrop-blur-3xl overflow-hidden z-10 ${theme.panel}`}>
                 <div
                   ref={lyricsContainerRef}
@@ -1715,9 +1704,7 @@ export default function HomePage() {
           </div>
         </main>
 
-        {/* ==================================================================== */}
-        {/* RIGHT COLUMN: QUEUE                                                  */}
-        {/* ==================================================================== */}
+        {/* RIGHT COLUMN: QUEUE */}
         {layout === 'studio' && (
           <aside
             className={`h-full w-64 border-l backdrop-blur-2xl flex flex-col shrink-0 overflow-hidden transition-all duration-300 z-10 ${theme.panel}`}
@@ -1773,7 +1760,7 @@ export default function HomePage() {
                 <Palette className="w-5 h-5 text-emerald-500" />
                 <div>
                   <h3 className="font-bold text-sm">Atmosphere & Deck Customizer</h3>
-                  <p className="text-[10px] opacity-60">Pick a ready-to-use vibe or build your own custom UI from scratch</p>
+                  <p className="text-[10px] opacity-60">Pick a ready-to-use vibe or customize your own deck</p>
                 </div>
               </div>
               <button onClick={() => setShowAtmosphereModal(false)} className="opacity-50 hover:opacity-100 p-1">
@@ -1781,7 +1768,7 @@ export default function HomePage() {
               </button>
             </div>
 
-            {/* UNLOCKED ACCENT COLOR PALETTES (Always available) */}
+            {/* UNLOCKED ACCENT COLOR PALETTES */}
             <div className="space-y-1.5 border-b pb-3 border-inherit shrink-0">
               <div className="flex items-center justify-between text-[11px] font-mono uppercase tracking-wider opacity-60">
                 <span>Deck Button & Accent Colors</span>
@@ -1840,7 +1827,6 @@ export default function HomePage() {
             {/* Modal Body */}
             <div className="flex-1 overflow-y-auto pr-1 space-y-4">
               {atmoMode === 'presets' ? (
-                /* Mode 1: Presets */
                 <div className="space-y-4">
                   {/* Chameleon Reality */}
                   <div className="bg-gradient-to-r from-emerald-500/20 via-teal-500/10 to-transparent border border-emerald-500/30 p-4 rounded-2xl flex items-center justify-between">
@@ -1849,7 +1835,7 @@ export default function HomePage() {
                         <Compass className="w-4 h-4" /> Chameleon Reality (Live Weather & Clock Sync)
                       </p>
                       <p className="text-[11px] opacity-70 mt-1 max-w-sm">
-                        Automatically detects local rain, storms, snow, or sunny skies, and mirrors day/night lighting without forcing white mode.
+                        Automatically detects local rain, storms, snow, or sunny skies, and mirrors day/night lighting.
                       </p>
                       {localWeather && (
                         <p className="text-[10px] font-mono text-zinc-400 mt-1">
@@ -2030,6 +2016,7 @@ export default function HomePage() {
                       <Sliders className="w-3.5 h-3.5 text-emerald-500" /> 2. Wallpaper Camera & Focus Sliders
                     </label>
 
+                    {/* Blur Slider */}
                     <div className="space-y-1">
                       <div className="flex justify-between text-xs">
                         <span>Blur Intensity</span>
@@ -2049,6 +2036,7 @@ export default function HomePage() {
                       />
                     </div>
 
+                    {/* Dimming Slider */}
                     <div className="space-y-1">
                       <div className="flex justify-between text-xs">
                         <span>Dark Tint (Contrast with HUD)</span>
@@ -2068,6 +2056,7 @@ export default function HomePage() {
                       />
                     </div>
 
+                    {/* Vertical Crop Slider */}
                     <div className="space-y-1">
                       <div className="flex justify-between text-xs">
                         <span>Vertical Crop Position</span>
@@ -2089,6 +2078,7 @@ export default function HomePage() {
                       />
                     </div>
 
+                    {/* Zoom / Scale Slider */}
                     <div className="space-y-1">
                       <div className="flex justify-between text-xs">
                         <span>Zoom / Scale</span>
@@ -2197,7 +2187,7 @@ export default function HomePage() {
                     )}
                   </div>
 
-                  {/* Step 4: Layout View */}
+                  {/* Step 4: Layout Mode */}
                   <div className="space-y-3 border-t pt-4 border-inherit">
                     <label className="text-[11px] font-mono uppercase tracking-wider opacity-70 flex items-center gap-1.5 font-bold">
                       <LayoutGrid className="w-3.5 h-3.5 text-emerald-500" /> 4. Layout Mode
@@ -2384,28 +2374,25 @@ export default function HomePage() {
         </div>
       )}
 
-      {/* ==================================================================== */}
-      {/* 11.D: SPOTIFY AUTHENTICATION MODAL (NOW WITH EXIT & GUEST MODE)      */}
-      {/* ==================================================================== */}
+      {/* 11.D: SPOTIFY AUTH MODAL (WITH CLOSE ✕ & GUEST MODE) */}
       {showSpotifyModal && (
         <div
           onClick={(e) => {
-            // Click outside the box to close
             if (e.target === e.currentTarget) setShowSpotifyModal(false);
           }}
           className="fixed inset-0 bg-black/85 backdrop-blur-md z-50 flex items-center justify-center p-4 cursor-pointer"
         >
           <div className="bg-[#0c0d12] border border-white/10 w-full max-w-md rounded-3xl p-7 shadow-2xl text-center space-y-5 text-white relative cursor-default">
-            {/* 1. TOP EXIT BUTTON (✕) */}
+            {/* ✕ Close Button */}
             <button
               onClick={() => setShowSpotifyModal(false)}
               className="absolute top-4 right-4 p-2 text-zinc-400 hover:text-white rounded-full hover:bg-white/10 transition-colors"
-              title="Close and explore deck"
+              title="Close"
             >
               <X className="w-5 h-5" />
             </button>
 
-            {/* Logo & Header */}
+            {/* Logo */}
             <div className="w-14 h-14 bg-emerald-500/10 border border-emerald-500/30 text-emerald-500 rounded-2xl mx-auto flex items-center justify-center">
               <Disc3 className="w-7 h-7 animate-[spin_8s_linear_infinite]" />
             </div>
@@ -2434,7 +2421,6 @@ export default function HomePage() {
               />
             </div>
 
-            {/* Connect Button */}
             <button
               onClick={() => redirectToSpotifyAuth(spotifyClientId)}
               className="w-full py-3 bg-[#1DB954] hover:bg-[#1ed760] text-black font-bold rounded-2xl text-xs tracking-wide uppercase transition-all shadow-lg shadow-emerald-500/20 flex items-center justify-center gap-2 hover:scale-[1.02] active:scale-[0.98]"
@@ -2443,7 +2429,7 @@ export default function HomePage() {
               Continue with Spotify
             </button>
 
-            {/* 2. GUEST / DEMO MODE BUTTON */}
+            {/* Guest Mode */}
             <div className="pt-2 border-t border-white/10">
               <button
                 onClick={() => setShowSpotifyModal(false)}
@@ -2455,3 +2441,6 @@ export default function HomePage() {
           </div>
         </div>
       )}
+    </div>
+  );
+}
