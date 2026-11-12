@@ -1,89 +1,76 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { cookies } from 'next/headers';
+
+const CLIENT_ID = process.env.SPOTIFY_CLIENT_ID || '';
+const CLIENT_SECRET = process.env.SPOTIFY_CLIENT_SECRET || '';
 
 export async function POST(req: NextRequest) {
-  try {
-    const body = await req.json();
+  const cookieStore = cookies();
+  const sessionCookie = cookieStore.get('spotify_session')?.value;
 
-    // 1. EXCHANGE AUTH CODE FOR TOKENS (Bypasses School Firewall)
-    if (body.type === 'token_exchange') {
-      const { code, verifier, clientId, redirectUri } = body;
-      if (!code || !verifier || !clientId || !redirectUri) {
-        return NextResponse.json({ error: 'Missing exchange parameters' }, { status: 400 });
-      }
-
-      const payload = new URLSearchParams({
-        client_id: clientId,
-        grant_type: 'authorization_code',
-        code,
-        redirect_uri: redirectUri,
-        code_verifier: verifier,
-      });
-
-      const tokenRes = await fetch('https://accounts.spotify.com/api/token', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: payload.toString(),
-      });
-
-      const tokenData = await tokenRes.json();
-      return NextResponse.json(tokenData, { status: tokenRes.status });
-    }
-
-    // 2. REFRESH EXPIRED TOKEN (Bypasses School Firewall)
-    if (body.type === 'token_refresh') {
-      const { clientId, refreshToken } = body;
-      if (!clientId || !refreshToken) {
-        return NextResponse.json({ error: 'Missing refresh credentials' }, { status: 400 });
-      }
-
-      const payload = new URLSearchParams({
-        client_id: clientId,
-        grant_type: 'refresh_token',
-        refresh_token: refreshToken,
-      });
-
-      const tokenRes = await fetch('https://accounts.spotify.com/api/token', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: payload.toString(),
-      });
-
-      const tokenData = await tokenRes.json();
-      return NextResponse.json(tokenData, { status: tokenRes.status });
-    }
-
-    // 3. PROXY SPOTIFY WEB API CALL
-    const { endpoint, method = 'GET', payload, token } = body;
-
-    if (!token) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
-
-    const spotifyUrl = `https://api.spotify.com/v1${endpoint}`;
-    const headers: Record<string, string> = {
-      Authorization: `Bearer ${token}`,
-      'Content-Type': 'application/json',
-    };
-
-    const fetchOptions: RequestInit = {
-      method,
-      headers,
-    };
-
-    if (payload && method !== 'GET' && method !== 'HEAD') {
-      fetchOptions.body = typeof payload === 'string' ? payload : JSON.stringify(payload);
-    }
-
-    const spotifyRes = await fetch(spotifyUrl, fetchOptions);
-
-    if (spotifyRes.status === 204) {
-      return new NextResponse(null, { status: 204 });
-    }
-
-    const data = await spotifyRes.json().catch(() => ({}));
-    return NextResponse.json(data, { status: spotifyRes.status });
-  } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : 'Spotify proxy error';
-    return NextResponse.json({ error: msg }, { status: 500 });
+  if (!sessionCookie) {
+    return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
   }
+
+  let session: { accessToken: string; refreshToken: string; expiresAt: number };
+  try {
+    session = JSON.parse(sessionCookie);
+  } catch {
+    return NextResponse.json({ error: 'Invalid session' }, { status: 401 });
+  }
+
+  // If token is expiring in less than 60s -> Silent Auto-Refresh on Server
+  if (Date.now() > session.expiresAt - 60000 && session.refreshToken) {
+    const basicAuth = Buffer.from(`${CLIENT_ID}:${CLIENT_SECRET}`).toString('base64');
+    const refreshRes = await fetch('https://accounts.spotify.com/api/token', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+        Authorization: `Basic ${basicAuth}`,
+      },
+      body: new URLSearchParams({
+        grant_type: 'refresh_token',
+        refresh_token: session.refreshToken,
+      }),
+    });
+
+    if (refreshRes.ok) {
+      const refreshData = await refreshRes.json();
+      session.accessToken = refreshData.access_token;
+      if (refreshData.refresh_token) session.refreshToken = refreshData.refresh_token;
+      session.expiresAt = Date.now() + (refreshData.expires_in || 3600) * 1000;
+
+      cookieStore.set('spotify_session', JSON.stringify(session), {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === 'production',
+        sameSite: 'lax',
+        path: '/',
+        maxAge: 60 * 60 * 24 * 30,
+      });
+    } else {
+      cookieStore.delete('spotify_session');
+      return NextResponse.json({ error: 'Session expired' }, { status: 401 });
+    }
+  }
+
+  const { endpoint, method = 'GET', payload } = await req.json();
+  const spotifyUrl = `https://api.spotify.com/v1${endpoint}`;
+  const headers: Record<string, string> = {
+    Authorization: `Bearer ${session.accessToken}`,
+    'Content-Type': 'application/json',
+  };
+
+  const fetchOptions: RequestInit = { method, headers };
+  if (payload && method !== 'GET' && method !== 'HEAD') {
+    fetchOptions.body = typeof payload === 'string' ? payload : JSON.stringify(payload);
+  }
+
+  const spotifyRes = await fetch(spotifyUrl, fetchOptions);
+
+  if (spotifyRes.status === 204) {
+    return new NextResponse(null, { status: 204 });
+  }
+
+  const data = await spotifyRes.json().catch(() => ({}));
+  return NextResponse.json(data, { status: spotifyRes.status });
 }

@@ -9,47 +9,32 @@ const SCOPES = [
   'playlist-read-collaborative',
 ].join(' ');
 
-export async function redirectToSpotifyAuth(customClientId?: string) {
-  try {
-    let clientId = customClientId || CLIENT_ID || localStorage.getItem('spotify_client_id') || '';
+// Replace lines 12 to 45 in lib/spotify.ts with this:
 
-    if (!clientId.trim()) {
-      clientId = prompt('Please paste your Spotify Client ID to log in:') || '';
-    }
+export async function redirectToSpotifyAuth() {
+  // Put your real 32-character Spotify Client ID here:
+  const clientId = 'YOUR_SPOTIFY_CLIENT_ID_HERE'; 
 
-    if (!clientId.trim()) {
-      alert('Cannot connect without a Spotify Client ID.');
-      return;
-    }
-
-    localStorage.setItem('spotify_client_id', clientId.trim());
-
-    const verifier = generateRandomString(64);
-    localStorage.setItem('pkce_verifier', verifier);
-
-    const hashed = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(verifier));
-    const bytes = new Uint8Array(hashed);
-    let binary = '';
-    for (let i = 0; i < bytes.byteLength; i++) {
-      binary += String.fromCharCode(bytes[i]);
-    }
-
-    const challenge = btoa(binary).replace(/=/g, '').replace(/\+/g, '-').replace(/\//g, '_');
-    const redirectUri = `${window.location.origin}/callback`;
-    const params = new URLSearchParams({
-      client_id: clientId.trim(),
-      response_type: 'code',
-      redirect_uri: redirectUri,
-      code_challenge_method: 'S256',
-      code_challenge: challenge,
-      scope: SCOPES,
-    });
-
-    window.location.href = `https://accounts.spotify.com/authorize?${params.toString()}`;
-  } catch (err: unknown) {
-    console.error('Redirect failed:', err);
-    alert('Spotify login error: ' + (err instanceof Error ? err.message : String(err)));
+  if (!clientId || clientId === 'YOUR_SPOTIFY_CLIENT_ID_HERE') {
+    alert('Paste your Spotify Client ID inside lib/spotify.ts at line 14!');
+    return;
   }
+
+  const verifier = generateRandomString(64);
+  localStorage.setItem('pkce_verifier', verifier);
+
+  const hashed = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(verifier));
+  const bytes = new Uint8Array(hashed);
+  let binary = '';
+  for (let i = 0; i < bytes.byteLength; i++) {
+    binary += String.fromCharCode(bytes[i]);
+  }
+
+  const challenge = btoa(binary).replace(/=/g, '').replace(/\+/g, '-').replace(/\//g, '_');
+  const redirectUri = `${window.location.origin}/callback`;
+
+  // Direct, unblocked redirect straight to Spotify login
+  window.location.href = `https://accounts.spotify.com/authorize?client_id=${clientId}&response_type=code&redirect_uri=${encodeURIComponent(redirectUri)}&code_challenge_method=S256&code_challenge=${challenge}&scope=${encodeURIComponent(SCOPES)}`;
 }
 
 // Proxied through /api/spotify so school Wi-Fi cannot block code exchange
