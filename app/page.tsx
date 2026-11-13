@@ -985,7 +985,7 @@ export default function HomePage() {
     setIsAiLoading(true);
 
     try {
-      const response = await askGemini(textToSend, messages, geminiKey, playback);
+      const response = await askGemini(textToSend, messages, playback);
       if (response.command) {
         executeCopilotCommand(response);
       }

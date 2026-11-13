@@ -7,19 +7,17 @@ export interface CopilotResponse {
 export interface ChatMessage {
   role: 'user' | 'model';
   text: string;
-  actionTaken?: string;
 }
 
 export async function askGemini(
   prompt: string,
   history: ChatMessage[],
-  apiKey: string,
   currentTrackInfo?: { name: string; artist: string; album: string; isPlaying: boolean } | null
 ): Promise<CopilotResponse> {
   const res = await fetch('/api/copilot', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ prompt, history, apiKey, currentTrackInfo }),
+    body: JSON.stringify({ prompt, history, currentTrackInfo }),
   });
 
   if (!res.ok) {
