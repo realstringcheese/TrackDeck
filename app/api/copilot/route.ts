@@ -22,39 +22,63 @@ interface CopilotRequestBody {
   messages?: ChatMessage[];
   playback?: PlaybackContext | null;
   currentTrackInfo?: PlaybackContext | null;
-}
-
-interface GeminiPart {
-  text?: string;
+  customApiKey?: string;
 }
 
 interface GeminiResponse {
-  candidates?: {
-    content?: {
-      parts?: GeminiPart[];
-    };
-  }[];
-  error?: {
-    message?: string;
-  };
+  candidates?: { content?: { parts?: { text?: string }[] } }[];
+  error?: { message?: string };
 }
 
 const VALID_COMMANDS = new Set(['play', 'pause', 'next', 'prev', 'queue']);
 
-export async function POST(req: NextRequest) {
-  const apiKey = process.env.GEMINI_API_KEY?.trim();
-  if (!apiKey) {
-    return NextResponse.json(
-      { error: 'GEMINI_API_KEY is not configured on the server.' },
-      { status: 500 }
-    );
-  }
+export async function GET() {
+  const hasServerKey = Boolean(process.env.GEMINI_API_KEY?.trim());
+  return NextResponse.json({ hasServerKey });
+}
 
+async function callGeminiModel(
+  model: string,
+  apiKey: string,
+  payload: object,
+  timeoutMs: number
+) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const res = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-goog-api-key': apiKey,
+        },
+        body: JSON.stringify(payload),
+        signal: controller.signal,
+      }
+    );
+    const data = (await res.json().catch(() => ({}))) as GeminiResponse;
+    return { ok: res.ok, status: res.status, data };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+export async function POST(req: NextRequest) {
   let body: CopilotRequestBody;
   try {
     body = await req.json();
   } catch {
     return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 });
+  }
+
+  const apiKey = body.customApiKey?.trim() || process.env.GEMINI_API_KEY?.trim();
+  if (!apiKey) {
+    return NextResponse.json(
+      { error: 'No Gemini API key detected. Add one in Settings or Vercel env vars.' },
+      { status: 400 }
+    );
   }
 
   const userText = (body.prompt || body.message || body.text || '').trim();
@@ -68,9 +92,8 @@ export async function POST(req: NextRequest) {
     ? body.messages
     : [];
 
-  // Gemini requires multi-turn history to start with a 'user' role and alternate cleanly
   const cleanHistory: { role: 'user' | 'model'; parts: { text: string }[] }[] = [];
-  for (const msg of rawHistory.slice(-10)) {
+  for (const msg of rawHistory.slice(-8)) {
     if (!msg?.text?.trim()) continue;
     const role: 'user' | 'model' = msg.role === 'user' ? 'user' : 'model';
     if (cleanHistory.length === 0 && role === 'model') continue;
@@ -83,21 +106,12 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  // Avoid duplicating the current prompt if the client already appended it to messages
-  const lastTurn = cleanHistory[cleanHistory.length - 1];
-  if (lastTurn && lastTurn.role === 'user' && lastTurn.parts[0].text === userText) {
+  if (
+    cleanHistory.length > 0 &&
+    cleanHistory[cleanHistory.length - 1].role === 'user'
+  ) {
     cleanHistory.pop();
   }
-
-  // Ensure the final turn before appending the new user message isn't also 'user'
-  if (cleanHistory.length > 0 && cleanHistory[cleanHistory.length - 1].role === 'user') {
-    cleanHistory.pop();
-  }
-
-  const contents = [
-    ...cleanHistory,
-    { role: 'user' as const, parts: [{ text: userText }] },
-  ];
 
   const pb = body.playback || body.currentTrackInfo;
   const nowPlayingContext = pb?.name
@@ -105,62 +119,62 @@ export async function POST(req: NextRequest) {
     : 'Nothing is currently playing.';
 
   const systemPrompt = [
-    'You are TrackDeck Copilot, a fast, knowledgeable AI music companion and Spotify controller.',
+    'You are TrackDeck Copilot, a fast AI music companion and Spotify controller.',
     nowPlayingContext,
     'Rules:',
-    '- If the user wants to control playback, set "command" to one of: "play", "pause", "next", "prev", "queue". Otherwise set "command" to "none".',
-    '- If "command" is "play" for a specific song/artist or "queue", set "query" to a clean Spotify search query (e.g. "Silly Watch Lil Uzi Vert"). Otherwise set "query" to "".',
-    '- For resume/unpause with no specific song requested, set "command" to "play" and "query" to "".',
-    '- Keep "message" concise, helpful, and conversational (music trivia, producer/sample facts, recommendations, or quick confirmation).',
+    '- If the user wants to control playback, set "command" to "play", "pause", "next", "prev", or "queue". Otherwise set "command" to "none".',
+    '- If "command" is "play" for a specific track/artist or "queue", set "query" to a clean Spotify search query. Otherwise set "query" to "".',
+    '- For resume/unpause with no specific song, set "command" to "play" and "query" to "".',
+    '- Keep "message" concise and conversational.',
   ].join('\n');
 
-  try {
-    const geminiRes = await fetch(
-      'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent',
-      {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-goog-api-key': apiKey,
+  const payload = {
+    systemInstruction: { parts: [{ text: systemPrompt }] },
+    contents: [...cleanHistory, { role: 'user', parts: [{ text: userText }] }],
+    generationConfig: {
+      responseMimeType: 'application/json',
+      responseSchema: {
+        type: 'OBJECT',
+        properties: {
+          message: { type: 'STRING' },
+          command: {
+            type: 'STRING',
+            enum: ['play', 'pause', 'next', 'prev', 'queue', 'none'],
+          },
+          query: { type: 'STRING' },
         },
-        body: JSON.stringify({
-          systemInstruction: {
-            parts: [{ text: systemPrompt }],
-          },
-          contents,
-          generationConfig: {
-            responseMimeType: 'application/json',
-            responseSchema: {
-              type: 'OBJECT',
-              properties: {
-                message: { type: 'STRING' },
-                command: {
-                  type: 'STRING',
-                  enum: ['play', 'pause', 'next', 'prev', 'queue', 'none'],
-                },
-                query: { type: 'STRING' },
-              },
-              required: ['message', 'command', 'query'],
-            },
-            thinkingConfig: {
-              thinkingLevel: 'LOW',
-            },
-          },
-        }),
-      }
-    );
+        required: ['message', 'command', 'query'],
+      },
+      thinkingConfig: { thinkingLevel: 'LOW' },
+    },
+  };
 
-    const data = (await geminiRes.json()) as GeminiResponse;
+  try {
+    let result: { ok: boolean; status: number; data: GeminiResponse };
+    try {
+      result = await callGeminiModel('gemini-3.8-flash', apiKey, payload, 5500);
+    } catch {
+      result = { ok: false, status: 504, data: {} };
+    }
 
-    if (!geminiRes.ok) {
-      console.error('Gemini API error:', geminiRes.status, data);
+    if (
+      !result.ok &&
+      (result.status === 504 ||
+        result.status === 503 ||
+        result.status === 429 ||
+        result.status === 404)
+    ) {
+      result = await callGeminiModel('gemini-3.5-flash-lite', apiKey, payload, 4000);
+    }
+
+    if (!result.ok) {
       return NextResponse.json(
-        { error: data?.error?.message || `Gemini API error (${geminiRes.status})` },
-        { status: geminiRes.status }
+        { error: result.data?.error?.message || `Gemini API error (${result.status})` },
+        { status: result.status || 500 }
       );
     }
 
-    const rawText = data?.candidates?.[0]?.content?.parts?.[0]?.text || '{}';
+    const rawText = result.data?.candidates?.[0]?.content?.parts?.[0]?.text || '{}';
     const cleanedJson = rawText.replace(/^```json\s*|\s*```$/g, '').trim();
 
     let parsed: { message?: string; command?: string; query?: string } = {};

@@ -46,11 +46,21 @@ export async function askGemini(
   history: ChatMessage[],
   currentTrackInfo?: { name: string; artist: string; album: string; isPlaying: boolean } | null
 ): Promise<CopilotResponse> {
-  const res = await fetch('/api/copilot', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ prompt, history, currentTrackInfo }),
-  });
+  const customApiKey =
+    typeof window !== 'undefined'
+      ? localStorage.getItem('trackdeck_gemini_key') || undefined
+      : undefined;
+
+  let res: Response;
+  try {
+    res = await fetch('/api/copilot', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ prompt, history, currentTrackInfo, customApiKey }),
+    });
+  } catch {
+    throw new Error('Could not reach /api/copilot (check server deployment or network)');
+  }
 
   if (!res.ok) {
     const errorData = await res.json().catch(() => ({}));
