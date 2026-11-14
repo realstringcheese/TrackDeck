@@ -7,6 +7,9 @@ const SCOPES = [
   'user-read-currently-playing',
   'playlist-read-private',
   'playlist-read-collaborative',
+  'user-top-read',
+  'user-read-recently-played',
+  'user-read-private',
 ].join(' ');
 
 export async function GET(req: Request) {
@@ -19,7 +22,7 @@ export async function GET(req: Request) {
     response_type: 'code',
     redirect_uri: redirectUri,
     scope: SCOPES,
-    show_dialog: 'true', // Forces the Spotify sign-in dialog so it never skips silently
+    show_dialog: 'true',
   });
 
   return NextResponse.redirect(`https://accounts.spotify.com/authorize?${params.toString()}`);

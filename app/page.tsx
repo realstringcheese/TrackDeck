@@ -1,7 +1,7 @@
 'use client';
 
 // ============================================================================
-// SECTION 1: IMPORTS & INTERFACES (TOP-LEVEL)
+// SECTION 1: IMPORTS & INTERFACES
 // ============================================================================
 import { useState, useEffect, useRef } from 'react';
 import {
@@ -42,6 +42,10 @@ import {
   Compass,
   Activity,
   Layers,
+  BarChart3,
+  Clock,
+  LogOut,
+  LogIn,
 } from 'lucide-react';
 import { askGemini, ChatMessage, CopilotResponse } from '@/lib/gemini';
 import { fetchSyncedLyrics, LyricLine } from '@/lib/lyrics';
@@ -69,6 +73,19 @@ interface SpotifyDevice {
   name: string;
   type: string;
   is_active: boolean;
+}
+
+interface UserProfile {
+  name: string;
+  avatarUrl: string;
+  isPremium: boolean;
+  spotifyUrl: string;
+}
+
+interface TopArtist {
+  id: string;
+  name: string;
+  imageUrl: string;
 }
 
 interface SnowParticle {
@@ -333,6 +350,20 @@ export default function HomePage() {
     lastSyncTime: number;
   } | null>(null);
 
+  // Profile & Stats Menu State
+  const [showAccountMenu, setShowAccountMenu] = useState(false);
+  const [accountView, setAccountView] = useState<'profile' | 'stats'>('profile');
+  const [statsTimeframe, setStatsTimeframe] = useState<'short_term' | 'long_term'>('short_term');
+  const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
+  const [topArtists, setTopArtists] = useState<TopArtist[]>([]);
+  const [topTracks, setTopTracks] = useState<TrackItem[]>([]);
+  const [isLoadingStats, setIsLoadingStats] = useState(false);
+
+  // Live Session Telemetry
+  const [sessionMinutes, setSessionMinutes] = useState(0);
+  const [sessionTrackCount, setSessionTrackCount] = useState(0);
+  const lastTrackId = useRef<string | null>(null);
+
   // Devices, Playlists & Queue
   const [devices, setDevices] = useState<SpotifyDevice[]>([]);
   const [playlists, setPlaylists] = useState<Playlist[]>([]);
@@ -366,9 +397,10 @@ export default function HomePage() {
   const ambientAudioRef = useRef<HTMLAudioElement | null>(null);
   const lyricsContainerRef = useRef<HTMLDivElement | null>(null);
   const chatBottomRef = useRef<HTMLDivElement | null>(null);
+  const accountMenuRef = useRef<HTMLDivElement | null>(null);
 
   // ============================================================================
-  // SECTION 4: SERVER API WRAPPER (TALKS VIA /api/spotify TUNNEL)
+  // SECTION 4: SERVER API WRAPPER
   // ============================================================================
   async function callSpotify(endpoint: string, method: string = 'GET', payload?: object) {
     try {
@@ -395,7 +427,7 @@ export default function HomePage() {
   }
 
   // ============================================================================
-  // SECTION 5: LIFECYCLE & BACKGROUND POLLING
+  // SECTION 5: LIFECYCLE & BACKGROUND LOOPS
   // ============================================================================
 
   useEffect(() => {
@@ -435,12 +467,23 @@ export default function HomePage() {
     const savedScale = Number(localStorage.getItem('trackdeck_bg_scale') ?? 105);
     setBgScale(savedScale);
 
-    // Initial check
     fetchNowPlaying();
     loadPlaylists();
     loadQueue();
     loadDevices();
     detectLocalWeather().then(setLocalWeather);
+    loadUserProfile();
+  }, []);
+
+  // Close account popover when clicking outside
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (accountMenuRef.current && !accountMenuRef.current.contains(event.target as Node)) {
+        setShowAccountMenu(false);
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
   // Poll Playback (1.5s)
@@ -472,6 +515,23 @@ export default function HomePage() {
     }, 500);
     return () => clearInterval(timer);
   }, [playback?.isPlaying]);
+
+  // Session Minutes Ticker (Only counts while music is actively playing)
+  useEffect(() => {
+    if (!playback?.isPlaying) return;
+    const interval = setInterval(() => {
+      setSessionMinutes((prev) => prev + 1);
+    }, 60000);
+    return () => clearInterval(interval);
+  }, [playback?.isPlaying]);
+
+  // Count Songs Streamed during session
+  useEffect(() => {
+    if (playback?.id && playback.id !== lastTrackId.current) {
+      lastTrackId.current = playback.id;
+      setSessionTrackCount((prev) => prev + 1);
+    }
+  }, [playback?.id]);
 
   // Ambient Audio Player Sync
   useEffect(() => {
@@ -541,7 +601,7 @@ export default function HomePage() {
   }, [messages]);
 
   // ============================================================================
-  // SECTION 6: REAL-TIME CANVAS WEATHER SHADER ENGINE
+  // SECTION 6: CANVAS WEATHER SHADER ENGINE
   // ============================================================================
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -731,8 +791,56 @@ export default function HomePage() {
   }, [weatherFx, fxDensity, fxSpeed]);
 
   // ============================================================================
-  // SECTION 7: DATA LOADERS & AUTH HELPERS
+  // SECTION 7: PROFILE & MUSIC STATS LOADERS
   // ============================================================================
+
+  async function loadUserProfile() {
+    const data = await callSpotify('/me');
+    if (data && data.display_name) {
+      setUserProfile({
+        name: data.display_name,
+        avatarUrl: data.images?.[0]?.url || '',
+        isPremium: data.product === 'premium',
+        spotifyUrl: data.external_urls?.spotify || 'https://open.spotify.com',
+      });
+    }
+  }
+
+  async function loadUserStats(timeframe: 'short_term' | 'long_term') {
+    setIsLoadingStats(true);
+    setStatsTimeframe(timeframe);
+
+    try {
+      // Top Artists
+      const artistData = await callSpotify(`/me/top/artists?time_range=${timeframe}&limit=3`);
+      if (artistData?.items) {
+        setTopArtists(
+          artistData.items.map((a: { id: string; name: string; images?: { url: string }[] }) => ({
+            id: a.id,
+            name: a.name,
+            imageUrl: a.images?.[0]?.url || '',
+          }))
+        );
+      }
+
+      // Top Tracks
+      const trackData = await callSpotify(`/me/top/tracks?time_range=${timeframe}&limit=3`);
+      if (trackData?.items) {
+        setTopTracks(
+          trackData.items.map((t: TrackItem) => ({
+            id: t.id,
+            name: t.name,
+            artists: t.artists,
+            album: t.album,
+            duration_ms: t.duration_ms,
+            uri: t.uri,
+          }))
+        );
+      }
+    } finally {
+      setIsLoadingStats(false);
+    }
+  }
 
   async function loadDevices() {
     const data = await callSpotify('/me/player/devices');
@@ -1212,15 +1320,15 @@ export default function HomePage() {
         </div>
 
         {/* Right Actions */}
-        <div className="flex items-center gap-1.5">
+        <div className="flex items-center gap-1.5 relative" ref={accountMenuRef}>
           {!isAuthenticated && (
             <a
               href="/api/auth/login"
-              className="text-[11px] font-bold px-3.5 py-1 rounded-full bg-[#1DB954] hover:bg-[#1ed760] text-black transition-all flex items-center gap-1 shadow-sm"
+              className="text-[11px] font-bold px-3.5 py-1 rounded-full bg-[#1DB954] hover:bg-[#1ed760] text-black transition-all flex items-center gap-1 shadow-sm mr-1"
               title="Connect Spotify Account"
             >
               <Music2 className="w-3 h-3 fill-current" />
-              <span>Connect Spotify</span>
+              <span>Connect</span>
             </a>
           )}
 
@@ -1242,15 +1350,198 @@ export default function HomePage() {
             <Settings className="w-4 h-4 opacity-70 hover:opacity-100" />
           </button>
 
-          {/* Account Logout */}
-          {isAuthenticated && (
-            <a
-              href="/api/auth/logout"
-              title="Log Out of Spotify"
-              className="p-1.5 rounded-lg hover:bg-white/10 hover:text-rose-400 transition-colors"
+          {/* Account Profile Button (Opens 2-Stage Menu) */}
+          <button
+            onClick={() => {
+              setShowAccountMenu((prev) => !prev);
+              setAccountView('profile'); // Reset to clean stage 1
+            }}
+            title="Account & Stats"
+            className="p-1 rounded-full hover:ring-2 hover:ring-emerald-500/50 transition-all flex items-center justify-center overflow-hidden"
+          >
+            {userProfile?.avatarUrl ? (
+              <img src={userProfile.avatarUrl} alt={userProfile.name} className="w-6 h-6 rounded-full object-cover" />
+            ) : (
+              <div className="w-6 h-6 rounded-full bg-white/10 flex items-center justify-center text-zinc-300">
+                <User className="w-3.5 h-3.5" />
+              </div>
+            )}
+          </button>
+
+          {/* ============================================================== */}
+          {/* THE 2-STAGE ACCOUNT & MINI-WRAPPED DROPDOWN MENU                */}
+          {/* ============================================================== */}
+          {showAccountMenu && (
+            <div
+              className={`absolute top-12 right-0 w-80 rounded-2xl shadow-2xl border p-4 backdrop-blur-3xl z-50 transition-all ${theme.modal}`}
             >
-              <User className="w-4 h-4 opacity-70 hover:opacity-100" />
-            </a>
+              {/* STAGE 1: CLEAN PROFILE CARD */}
+              {accountView === 'profile' ? (
+                <div className="space-y-4">
+                  {/* User Header */}
+                  <div className="flex items-center gap-3 pb-3 border-b border-inherit">
+                    {userProfile?.avatarUrl ? (
+                      <img src={userProfile.avatarUrl} alt={userProfile.name} className="w-12 h-12 rounded-full object-cover shadow-md shrink-0" />
+                    ) : (
+                      <div className="w-12 h-12 rounded-full bg-white/10 flex items-center justify-center text-zinc-300 shrink-0">
+                        <User className="w-6 h-6" />
+                      </div>
+                    )}
+                    <div className="truncate flex-1">
+                      <h4 className="font-bold text-sm text-white truncate">
+                        {userProfile?.name || (isAuthenticated ? 'Spotify Connected' : 'Guest Listener')}
+                      </h4>
+                      <p className="text-[11px] text-zinc-400">
+                        {isAuthenticated ? (
+                          <span className="text-emerald-400 font-medium">● Premium Active</span>
+                        ) : (
+                          'Offline Mode'
+                        )}
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Button to unlock Stats */}
+                  {isAuthenticated ? (
+                    <button
+                      onClick={() => {
+                        setAccountView('stats');
+                        loadUserStats('short_term');
+                      }}
+                      className={`w-full py-2.5 px-3 rounded-xl text-xs font-bold flex items-center justify-between transition-all ${theme.accentBtn}`}
+                    >
+                      <span className="flex items-center gap-2">
+                        <BarChart3 className="w-4 h-4" /> Music Stats & Mini-Wrapped
+                      </span>
+                      <span>→</span>
+                    </button>
+                  ) : (
+                    <a
+                      href="/api/auth/login"
+                      className="w-full py-2.5 px-3 rounded-xl text-xs font-bold bg-[#1DB954] hover:bg-[#1ed760] text-black flex items-center justify-center gap-2 transition-all shadow-md"
+                    >
+                      <LogIn className="w-4 h-4" /> Connect with Spotify
+                    </a>
+                  )}
+
+                  {/* Actions Bar */}
+                  <div className="pt-2 border-t border-inherit flex items-center justify-between text-xs">
+                    {userProfile?.spotifyUrl && (
+                      <a
+                        href={userProfile.spotifyUrl}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="text-zinc-400 hover:text-white flex items-center gap-1 transition-colors"
+                      >
+                        Profile <ExternalLink className="w-3 h-3" />
+                      </a>
+                    )}
+
+                    {isAuthenticated && (
+                      <a
+                        href="/api/auth/logout"
+                        className="text-rose-400 hover:text-rose-300 flex items-center gap-1 transition-colors font-medium ml-auto"
+                      >
+                        <LogOut className="w-3.5 h-3.5" /> Log Out
+                      </a>
+                    )}
+                  </div>
+                </div>
+              ) : (
+                /* STAGE 2: EXPANDED STATS & MINI-WRAPPED */
+                <div className="space-y-3.5">
+                  {/* Top Bar with Back Arrow */}
+                  <div className="flex items-center justify-between pb-2 border-b border-inherit">
+                    <button
+                      onClick={() => setAccountView('profile')}
+                      className="text-xs text-zinc-400 hover:text-white flex items-center gap-1 font-medium transition-colors"
+                    >
+                      <ArrowLeft className="w-3.5 h-3.5" /> Back
+                    </button>
+                    <span className="text-[11px] font-mono uppercase tracking-wider text-emerald-400 font-bold">
+                      Mini-Wrapped
+                    </span>
+                  </div>
+
+                  {/* Timeframe Toggle: 4 Weeks vs All-Time */}
+                  <div className="grid grid-cols-2 gap-1.5 p-1 bg-black/30 rounded-xl border border-white/10">
+                    <button
+                      onClick={() => loadUserStats('short_term')}
+                      className={`py-1 text-[10px] font-bold rounded-lg transition-all ${
+                        statsTimeframe === 'short_term' ? theme.accentBtn : 'text-zinc-400 hover:text-white'
+                      }`}
+                    >
+                      Past 4 Weeks
+                    </button>
+                    <button
+                      onClick={() => loadUserStats('long_term')}
+                      className={`py-1 text-[10px] font-bold rounded-lg transition-all ${
+                        statsTimeframe === 'long_term' ? theme.accentBtn : 'text-zinc-400 hover:text-white'
+                      }`}
+                    >
+                      All-Time
+                    </button>
+                  </div>
+
+                  {/* Stats Content */}
+                  {isLoadingStats ? (
+                    <div className="py-8 text-center text-xs opacity-50 animate-pulse">Calculating your audio DNA...</div>
+                  ) : (
+                    <div className="space-y-3 max-h-60 overflow-y-auto no-scrollbar pr-1">
+                      {/* Top Artists */}
+                      <div className="space-y-1.5">
+                        <p className="text-[10px] font-mono uppercase tracking-wider text-zinc-400 font-bold">
+                          👑 Top Artists
+                        </p>
+                        <div className="space-y-1">
+                          {topArtists.map((art, idx) => (
+                            <div key={art.id} className="flex items-center gap-2 p-1.5 rounded-lg bg-white/5 text-xs">
+                              <span className="font-mono text-zinc-500 text-[10px] w-3">{idx + 1}</span>
+                              <img src={art.imageUrl} alt={art.name} className="w-6 h-6 rounded-full object-cover" />
+                              <span className="font-semibold text-zinc-200 truncate">{art.name}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+
+                      {/* Top Tracks */}
+                      <div className="space-y-1.5 pt-1">
+                        <p className="text-[10px] font-mono uppercase tracking-wider text-zinc-400 font-bold">
+                          🔥 Top Tracks
+                        </p>
+                        <div className="space-y-1">
+                          {topTracks.map((tr, idx) => (
+                            <div
+                              key={tr.id}
+                              onClick={() => handlePlayTrack(tr.uri)}
+                              className="group flex items-center justify-between p-1.5 rounded-lg bg-white/5 hover:bg-white/10 cursor-pointer text-xs transition-colors"
+                              title="Click to play"
+                            >
+                              <div className="flex items-center gap-2 truncate flex-1 pr-2">
+                                <span className="font-mono text-zinc-500 text-[10px] w-3">{idx + 1}</span>
+                                <img src={tr.album?.images?.[0]?.url || ''} alt={tr.name} className="w-6 h-6 rounded object-cover" />
+                                <span className="font-semibold text-zinc-200 truncate group-hover:text-emerald-400 transition-colors">
+                                  {tr.name}
+                                </span>
+                              </div>
+                              <Play className="w-3 h-3 text-zinc-500 group-hover:text-emerald-400 fill-current opacity-0 group-hover:opacity-100 transition-opacity" />
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+
+                      {/* Session Telemetry Badge */}
+                      <div className="p-2.5 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-[11px] font-mono text-emerald-300 flex items-center justify-between">
+                        <span className="flex items-center gap-1.5">
+                          <Clock className="w-3.5 h-3.5 text-emerald-400" /> Deck Time: {sessionMinutes}m
+                        </span>
+                        <span>• {sessionTrackCount} Songs Streamed</span>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
           )}
         </div>
       </header>
@@ -1721,7 +2012,7 @@ export default function HomePage() {
                         <Compass className="w-4 h-4" /> Chameleon Reality (Live Weather & Clock Sync)
                       </p>
                       <p className="text-[11px] opacity-70 mt-1 max-w-sm">
-                        Automatically detects local rain, storms, snow, or sunny skies, and mirrors day/night lighting without forcing white mode.
+                        Automatically detects local weather & mirrors day/night lighting.
                       </p>
                       {localWeather && (
                         <p className="text-[10px] font-mono text-zinc-400 mt-1">
