@@ -6,9 +6,10 @@ interface SpotifySession {
   expiresAt: number;
 }
 
-type RefreshResult =
-  | { ok: true; session: SpotifySession }
-  | { ok: false; errorStatus: number; errText: string };
+interface RefreshResult {
+  session: SpotifySession | null;
+  errorStatus?: number;
+}
 
 function getIsHttps(req: NextRequest) {
   const proto =
@@ -22,10 +23,10 @@ async function refreshAccessToken(refreshToken: string): Promise<RefreshResult> 
   const clientSecret = process.env.SPOTIFY_CLIENT_SECRET?.trim() || '';
 
   if (!clientId || !clientSecret) {
-    return { ok: false, errorStatus: 500, errText: 'Missing Spotify server credentials' };
+    return { session: null, errorStatus: 500 };
   }
   if (!refreshToken) {
-    return { ok: false, errorStatus: 400, errText: 'Missing refresh token' };
+    return { session: null, errorStatus: 400 };
   }
 
   const basicAuth = Buffer.from(`${clientId}:${clientSecret}`).toString('base64');
@@ -44,12 +45,11 @@ async function refreshAccessToken(refreshToken: string): Promise<RefreshResult> 
   if (!res.ok) {
     const errText = await res.text();
     console.error('Spotify refresh failed:', res.status, errText);
-    return { ok: false, errorStatus: res.status, errText };
+    return { session: null, errorStatus: res.status };
   }
 
   const data = await res.json();
   return {
-    ok: true,
     session: {
       accessToken: data.access_token as string,
       refreshToken: (data.refresh_token as string) || refreshToken,
@@ -91,7 +91,7 @@ export async function POST(req: NextRequest) {
   // Proactive silent refresh if expiring within 60s
   if (Date.now() > session.expiresAt - 60000 && session.refreshToken) {
     const refreshed = await refreshAccessToken(session.refreshToken);
-    if (refreshed.ok) {
+    if (refreshed.session) {
       session = refreshed.session;
       refreshedSession = refreshed.session;
     } else if (refreshed.errorStatus === 400 || refreshed.errorStatus === 401) {
@@ -123,7 +123,7 @@ export async function POST(req: NextRequest) {
   // Reactive retry once if Spotify rejected token with 401
   if (spotifyRes.status === 401 && session.refreshToken) {
     const refreshed = await refreshAccessToken(session.refreshToken);
-    if (refreshed.ok) {
+    if (refreshed.session) {
       session = refreshed.session;
       refreshedSession = refreshed.session;
       spotifyRes = await callUpstream(session.accessToken);
