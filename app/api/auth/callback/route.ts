@@ -1,21 +1,46 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { cookies } from 'next/headers';
 
-const CLIENT_ID = process.env.SPOTIFY_CLIENT_ID || '';
-const CLIENT_SECRET = process.env.SPOTIFY_CLIENT_SECRET || '';
+function getSafeOrigin(req: NextRequest) {
+  const rawHost = (
+    req.headers.get('x-forwarded-host') ||
+    req.headers.get('host') ||
+    '127.0.0.1:3000'
+  )
+    .split(',')[0]
+    .trim();
+
+  const safeHost = rawHost.replace(/^localhost(:|$)/, '127.0.0.1$1');
+  const isLocal = safeHost.startsWith('127.0.0.1');
+  const proto = (
+    req.headers.get('x-forwarded-proto')?.split(',')[0].trim() ||
+    (isLocal ? 'http' : 'https')
+  );
+
+  return { origin: `${proto}://${safeHost}`, isHttps: proto === 'https' };
+}
 
 export async function GET(req: NextRequest) {
-  const code = req.nextUrl.searchParams.get('code');
-  const host = req.headers.get('host') || 'localhost:3000';
-  const protocol = host.includes('localhost') || host.includes('127.0.0.1') ? 'http' : 'https';
-  const redirectUri = `${protocol}://${host}/api/auth/callback`;
+  const { origin, isHttps } = getSafeOrigin(req);
+  const clientId = process.env.SPOTIFY_CLIENT_ID?.trim() || '';
+  const clientSecret = process.env.SPOTIFY_CLIENT_SECRET?.trim() || '';
 
-  if (!code) {
-    return NextResponse.redirect(new URL('/?error=no_code', req.url));
+  const spotifyError = req.nextUrl.searchParams.get('error');
+  if (spotifyError) {
+    return NextResponse.redirect(`${origin}/?error=${encodeURIComponent(spotifyError)}`);
   }
 
-  // Server-to-server exchange using your private Client Secret
-  const basicAuth = Buffer.from(`${CLIENT_ID}:${CLIENT_SECRET}`).toString('base64');
+  const code = req.nextUrl.searchParams.get('code');
+  if (!code) {
+    return NextResponse.redirect(`${origin}/?error=no_code`);
+  }
+
+  if (!clientId || !clientSecret) {
+    return NextResponse.redirect(`${origin}/?error=missing_server_credentials`);
+  }
+
+  const redirectUri = `${origin}/api/auth/callback`;
+  const basicAuth = Buffer.from(`${clientId}:${clientSecret}`).toString('base64');
+
   const tokenRes = await fetch('https://accounts.spotify.com/api/token', {
     method: 'POST',
     headers: {
@@ -30,9 +55,11 @@ export async function GET(req: NextRequest) {
   });
 
   if (!tokenRes.ok) {
-    const err = await tokenRes.text();
-    console.error('Spotify token exchange failed:', err);
-    return NextResponse.redirect(new URL('/?error=token_failed', req.url));
+    const errText = await tokenRes.text();
+    console.error('Spotify token exchange failed:', errText);
+    return NextResponse.redirect(
+      `${origin}/?error=token_failed&detail=${encodeURIComponent(errText.slice(0, 120))}`
+    );
   }
 
   const data = await tokenRes.json();
@@ -42,15 +69,14 @@ export async function GET(req: NextRequest) {
     expiresAt: Date.now() + (data.expires_in || 3600) * 1000,
   };
 
-  // Save in an encrypted HTTP-Only cookie (Never accessible to browser scripts / school filters)
-  const cookieStore = cookies();
-  cookieStore.set('spotify_session', JSON.stringify(session), {
+  const res = NextResponse.redirect(`${origin}/`);
+  res.cookies.set('spotify_session', JSON.stringify(session), {
     httpOnly: true,
-    secure: process.env.NODE_ENV === 'production',
+    secure: isHttps,
     sameSite: 'lax',
     path: '/',
-    maxAge: 60 * 60 * 24 * 30, // 30 Days
+    maxAge: 60 * 60 * 24 * 30,
   });
 
-  return NextResponse.redirect(new URL('/', req.url));
+  return res;
 }

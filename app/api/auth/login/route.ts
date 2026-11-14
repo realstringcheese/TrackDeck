@@ -1,6 +1,5 @@
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 
-const CLIENT_ID = process.env.SPOTIFY_CLIENT_ID;
 const SCOPES = [
   'user-read-playback-state',
   'user-modify-playback-state',
@@ -12,13 +11,37 @@ const SCOPES = [
   'user-read-private',
 ].join(' ');
 
-export async function GET(req: Request) {
-  const host = req.headers.get('host') || 'localhost:3000';
-  const protocol = host.includes('localhost') || host.includes('127.0.0.1') ? 'http' : 'https';
-  const redirectUri = `${protocol}://${host}/api/auth/callback`;
+function getSafeOrigin(req: NextRequest) {
+  const rawHost = (
+    req.headers.get('x-forwarded-host') ||
+    req.headers.get('host') ||
+    '127.0.0.1:3000'
+  )
+    .split(',')[0]
+    .trim();
+
+  const safeHost = rawHost.replace(/^localhost(:|$)/, '127.0.0.1$1');
+  const isLocal = safeHost.startsWith('127.0.0.1');
+  const proto = (
+    req.headers.get('x-forwarded-proto')?.split(',')[0].trim() ||
+    (isLocal ? 'http' : 'https')
+  );
+
+  return `${proto}://${safeHost}`;
+}
+
+export async function GET(req: NextRequest) {
+  const clientId = process.env.SPOTIFY_CLIENT_ID?.trim();
+  const origin = getSafeOrigin(req);
+
+  if (!clientId) {
+    return NextResponse.redirect(`${origin}/?error=missing_client_id`);
+  }
+
+  const redirectUri = `${origin}/api/auth/callback`;
 
   const params = new URLSearchParams({
-    client_id: CLIENT_ID || '',
+    client_id: clientId,
     response_type: 'code',
     redirect_uri: redirectUri,
     scope: SCOPES,
