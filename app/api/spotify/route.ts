@@ -6,6 +6,10 @@ interface SpotifySession {
   expiresAt: number;
 }
 
+type RefreshResult =
+  | { ok: true; session: SpotifySession }
+  | { ok: false; errorStatus: number; errText: string };
+
 function getIsHttps(req: NextRequest) {
   const proto =
     req.headers.get('x-forwarded-proto')?.split(',')[0].trim() ||
@@ -13,10 +17,16 @@ function getIsHttps(req: NextRequest) {
   return proto === 'https';
 }
 
-async function refreshAccessToken(refreshToken: string) {
+async function refreshAccessToken(refreshToken: string): Promise<RefreshResult> {
   const clientId = process.env.SPOTIFY_CLIENT_ID?.trim() || '';
   const clientSecret = process.env.SPOTIFY_CLIENT_SECRET?.trim() || '';
-  if (!clientId || !clientSecret || !refreshToken) return null;
+
+  if (!clientId || !clientSecret) {
+    return { ok: false, errorStatus: 500, errText: 'Missing Spotify server credentials' };
+  }
+  if (!refreshToken) {
+    return { ok: false, errorStatus: 400, errText: 'Missing refresh token' };
+  }
 
   const basicAuth = Buffer.from(`${clientId}:${clientSecret}`).toString('base64');
   const res = await fetch('https://accounts.spotify.com/api/token', {
@@ -34,14 +44,17 @@ async function refreshAccessToken(refreshToken: string) {
   if (!res.ok) {
     const errText = await res.text();
     console.error('Spotify refresh failed:', res.status, errText);
-    return { errorStatus: res.status, errText };
+    return { ok: false, errorStatus: res.status, errText };
   }
 
   const data = await res.json();
   return {
-    accessToken: data.access_token as string,
-    refreshToken: (data.refresh_token as string) || refreshToken,
-    expiresAt: Date.now() + (data.expires_in || 3600) * 1000,
+    ok: true,
+    session: {
+      accessToken: data.access_token as string,
+      refreshToken: (data.refresh_token as string) || refreshToken,
+      expiresAt: Date.now() + (data.expires_in || 3600) * 1000,
+    },
   };
 }
 
@@ -78,10 +91,10 @@ export async function POST(req: NextRequest) {
   // Proactive silent refresh if expiring within 60s
   if (Date.now() > session.expiresAt - 60000 && session.refreshToken) {
     const refreshed = await refreshAccessToken(session.refreshToken);
-    if (refreshed && 'accessToken' in refreshed) {
-      session = refreshed;
-      refreshedSession = refreshed;
-    } else if (refreshed && refreshed.errorStatus === 400) {
+    if (refreshed.ok) {
+      session = refreshed.session;
+      refreshedSession = refreshed.session;
+    } else if (refreshed.errorStatus === 400 || refreshed.errorStatus === 401) {
       const res = NextResponse.json({ error: 'Session expired' }, { status: 401 });
       res.cookies.delete('spotify_session');
       return res;
@@ -110,9 +123,9 @@ export async function POST(req: NextRequest) {
   // Reactive retry once if Spotify rejected token with 401
   if (spotifyRes.status === 401 && session.refreshToken) {
     const refreshed = await refreshAccessToken(session.refreshToken);
-    if (refreshed && 'accessToken' in refreshed) {
-      session = refreshed;
-      refreshedSession = refreshed;
+    if (refreshed.ok) {
+      session = refreshed.session;
+      refreshedSession = refreshed.session;
       spotifyRes = await callUpstream(session.accessToken);
     } else {
       const res = NextResponse.json({ error: 'Session expired' }, { status: 401 });
