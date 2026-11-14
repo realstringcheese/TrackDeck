@@ -3,49 +3,51 @@
 // ============================================================================
 // SECTION 1: IMPORTS & INTERFACES
 // ============================================================================
-import { useState, useEffect, useRef } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
-  Play,
-  Pause,
-  SkipForward,
-  SkipBack,
-  Sparkles,
-  Music2,
-  Disc3,
-  ListPlus,
-  ArrowLeft,
-  Settings,
-  User,
-  RefreshCw,
-  X,
-  Send,
-  ExternalLink,
-  Smartphone,
-  Laptop,
-  Speaker,
-  Radio,
-  Palette,
-  Maximize2,
-  LayoutGrid,
-  Image as ImageIcon,
-  Upload,
-  Sliders,
-  CloudRain,
-  Zap,
-  Flame,
-  Snowflake,
-  Tv,
-  Check,
-  Wand2,
-  Mic2,
-  Volume2,
-  Compass,
   Activity,
-  Layers,
+  AlertCircle,
+  ArrowLeft,
   BarChart3,
+  Check,
   Clock,
-  LogOut,
+  CloudRain,
+  Compass,
+  Disc3,
+  ExternalLink,
+  Flame,
+  Image as ImageIcon,
+  Laptop,
+  LayoutGrid,
+  ListPlus,
   LogIn,
+  LogOut,
+  Maximize2,
+  Mic2,
+  Music2,
+  Palette,
+  Pause,
+  Play,
+  Power,
+  Radio,
+  RefreshCw,
+  RotateCcw,
+  Send,
+  Settings,
+  SkipBack,
+  SkipForward,
+  Sliders,
+  Smartphone,
+  Snowflake,
+  Sparkles,
+  Speaker,
+  Tv,
+  Upload,
+  User,
+  Volume2,
+  Wand2,
+  X,
+  Zap,
 } from 'lucide-react';
 import { askGemini, ChatMessage, CopilotResponse } from '@/lib/gemini';
 import { fetchSyncedLyrics, LyricLine } from '@/lib/lyrics';
@@ -88,6 +90,25 @@ interface TopArtist {
   imageUrl: string;
 }
 
+interface PlaybackState {
+  id?: string;
+  name: string;
+  artist: string;
+  album: string;
+  albumArt: string;
+  isPlaying: boolean;
+  progressMs: number;
+  durationMs: number;
+  device?: string;
+  lastSyncTime: number;
+}
+
+interface SonicDna {
+  bpm: number;
+  key: string;
+  energy: number;
+}
+
 interface SnowParticle {
   x: number;
   y: number;
@@ -110,6 +131,41 @@ interface GeneralParticle {
   opacity: number;
 }
 
+interface AppSettings {
+  pollIntervalMs: 1500 | 3000 | 5000;
+  showSonicDna: boolean;
+  autoWakeDevice: boolean;
+  autoScrollLyrics: boolean;
+}
+
+interface SpotifyCallResult<T = Record<string, unknown>> {
+  ok: boolean;
+  status: number;
+  data: T | null;
+  errorMessage?: string;
+}
+
+interface SpotifyPlayerApiResponse {
+  is_playing?: boolean;
+  progress_ms?: number;
+  device?: { id?: string; name?: string };
+  item?: {
+    id?: string;
+    name?: string;
+    duration_ms?: number;
+    artists?: { name: string }[];
+    album?: { name?: string; images?: { url: string }[] };
+    show?: { name?: string; images?: { url: string }[] };
+  };
+}
+
+interface SpotifyMeResponse {
+  display_name?: string;
+  images?: { url: string }[];
+  product?: string;
+  external_urls?: { spotify?: string };
+}
+
 type LayoutPreset = 'studio' | 'cinema';
 type ColorPreset = 'dark' | 'light' | 'neon' | 'aqua' | 'amber' | 'oled';
 type BgMode = 'album' | 'gallery' | 'custom';
@@ -120,7 +176,6 @@ type AmbientSoundType = 'off' | 'rain' | 'hearth' | 'wind';
 // ============================================================================
 // SECTION 2: CONFIGURATION & PRESET DATA
 // ============================================================================
-
 const GALLERY_WALLPAPERS = [
   {
     id: 'sunny-day',
@@ -219,6 +274,13 @@ const AMBIENT_SOUND_URLS: Record<AmbientSoundType, string> = {
   wind: 'https://assets.mixkit.co/active_storage/sfx/1271/1271-preview.mp3',
 };
 
+const DEFAULT_SETTINGS: AppSettings = {
+  pollIntervalMs: 1500,
+  showSonicDna: true,
+  autoWakeDevice: true,
+  autoScrollLyrics: true,
+};
+
 const THEME_CLASSES: Record<
   ColorPreset,
   {
@@ -228,6 +290,7 @@ const THEME_CLASSES: Record<
     border: string;
     accentBtn: string;
     accentText: string;
+    hoverAccentText: string;
     scrubBg: string;
     scrubFill: string;
     modal: string;
@@ -240,7 +303,8 @@ const THEME_CLASSES: Record<
     panel: 'bg-black/65 text-zinc-100 border-white/10',
     border: 'border-white/[0.08]',
     accentBtn: 'bg-emerald-500 hover:bg-emerald-400 text-black shadow-emerald-500/20',
-    accentText: 'text-emerald-500',
+    accentText: 'text-emerald-400',
+    hoverAccentText: 'group-hover:text-emerald-400',
     scrubBg: 'bg-white/[0.08] hover:bg-white/[0.14]',
     scrubFill: 'bg-emerald-500',
     modal: 'bg-[#0e1017] border-white/10 text-white',
@@ -253,6 +317,7 @@ const THEME_CLASSES: Record<
     border: 'border-zinc-200/80',
     accentBtn: 'bg-emerald-500 hover:bg-emerald-400 text-black shadow-emerald-500/10',
     accentText: 'text-emerald-600',
+    hoverAccentText: 'group-hover:text-emerald-600',
     scrubBg: 'bg-zinc-200 hover:bg-zinc-300',
     scrubFill: 'bg-emerald-500',
     modal: 'bg-white border-zinc-200 text-zinc-900',
@@ -265,6 +330,7 @@ const THEME_CLASSES: Record<
     border: 'border-pink-500/20',
     accentBtn: 'bg-gradient-to-r from-pink-500 to-rose-500 hover:from-pink-400 hover:to-rose-400 text-white shadow-pink-500/30',
     accentText: 'text-cyan-400',
+    hoverAccentText: 'group-hover:text-cyan-400',
     scrubBg: 'bg-pink-950/40 hover:bg-pink-900/50',
     scrubFill: 'bg-gradient-to-r from-cyan-400 to-pink-500',
     modal: 'bg-[#120826] border-pink-500/30 text-white',
@@ -277,6 +343,7 @@ const THEME_CLASSES: Record<
     border: 'border-cyan-500/20',
     accentBtn: 'bg-gradient-to-r from-cyan-400 to-teal-400 hover:from-cyan-300 hover:to-teal-300 text-black shadow-cyan-500/30',
     accentText: 'text-cyan-400',
+    hoverAccentText: 'group-hover:text-cyan-400',
     scrubBg: 'bg-cyan-950/40 hover:bg-cyan-900/50',
     scrubFill: 'bg-gradient-to-r from-cyan-400 to-teal-300',
     modal: 'bg-[#081b33] border-cyan-500/30 text-white',
@@ -289,6 +356,7 @@ const THEME_CLASSES: Record<
     border: 'border-amber-500/20',
     accentBtn: 'bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 text-black shadow-amber-500/30',
     accentText: 'text-amber-400',
+    hoverAccentText: 'group-hover:text-amber-400',
     scrubBg: 'bg-amber-950/40 hover:bg-amber-900/50',
     scrubFill: 'bg-gradient-to-r from-amber-400 to-orange-400',
     modal: 'bg-[#1a0f07] border-amber-500/30 text-white',
@@ -298,9 +366,10 @@ const THEME_CLASSES: Record<
     root: 'bg-[#000000] text-white',
     topBar: 'bg-[#000000] border-zinc-800 text-white',
     panel: 'bg-[#080808] text-white border-zinc-800',
-    border: 'border-zinc-850',
+    border: 'border-zinc-800',
     accentBtn: 'bg-white hover:bg-zinc-200 text-black shadow-white/10',
-    accentText: 'text-zinc-400',
+    accentText: 'text-zinc-300',
+    hoverAccentText: 'group-hover:text-zinc-300',
     scrubBg: 'bg-zinc-900 hover:bg-zinc-800',
     scrubFill: 'bg-white',
     modal: 'bg-[#000000] border-zinc-800 text-white',
@@ -309,9 +378,9 @@ const THEME_CLASSES: Record<
 };
 
 export default function HomePage() {
-  // ============================================================================
+  // ==========================================================================
   // SECTION 3: COMPONENT STATE
-  // ============================================================================
+  // ==========================================================================
   const [layout, setLayout] = useState<LayoutPreset>('studio');
   const [colorTheme, setColorTheme] = useState<ColorPreset>('dark');
   const [atmoMode, setAtmoMode] = useState<AtmosphereMode>('presets');
@@ -335,22 +404,14 @@ export default function HomePage() {
   const [localWeather, setLocalWeather] = useState<LocalWeatherReport | null>(null);
   const [isDetectingWeather, setIsDetectingWeather] = useState(false);
 
-  // Auth & Playback
+  // Auth, Connections, Settings & Status Banner
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
-  const [playback, setPlayback] = useState<{
-    id?: string;
-    name: string;
-    artist: string;
-    album: string;
-    albumArt: string;
-    isPlaying: boolean;
-    progressMs: number;
-    durationMs: number;
-    device?: string;
-    lastSyncTime: number;
-  } | null>(null);
+  const [copilotEnabled, setCopilotEnabled] = useState<boolean>(true);
+  const [settings, setSettings] = useState<AppSettings>(DEFAULT_SETTINGS);
+  const [statusBanner, setStatusBanner] = useState<string | null>(null);
 
-  // Profile & Stats Menu State
+  // Playback & Profile
+  const [playback, setPlayback] = useState<PlaybackState | null>(null);
   const [showAccountMenu, setShowAccountMenu] = useState(false);
   const [accountView, setAccountView] = useState<'profile' | 'stats'>('profile');
   const [statsTimeframe, setStatsTimeframe] = useState<'short_term' | 'long_term'>('short_term');
@@ -358,13 +419,10 @@ export default function HomePage() {
   const [topArtists, setTopArtists] = useState<TopArtist[]>([]);
   const [topTracks, setTopTracks] = useState<TrackItem[]>([]);
   const [isLoadingStats, setIsLoadingStats] = useState(false);
-
-  // Live Session Telemetry
   const [sessionMinutes, setSessionMinutes] = useState(0);
   const [sessionTrackCount, setSessionTrackCount] = useState(0);
-  const lastTrackId = useRef<string | null>(null);
 
-  // Devices, Playlists & Queue
+  // Devices, Playlists, Queue, Lyrics & Sonic DNA
   const [devices, setDevices] = useState<SpotifyDevice[]>([]);
   const [playlists, setPlaylists] = useState<Playlist[]>([]);
   const [selectedPlaylist, setSelectedPlaylist] = useState<Playlist | null>(null);
@@ -373,7 +431,7 @@ export default function HomePage() {
   const [queue, setQueue] = useState<TrackItem[]>([]);
   const [lyrics, setLyrics] = useState<LyricLine[] | null>(null);
   const [currentLyricIdx, setCurrentLyricIdx] = useState<number>(-1);
-  const [sonicDna, setSonicDna] = useState<{ bpm: number; key: string; energy: number } | null>(null);
+  const [sonicDna, setSonicDna] = useState<SonicDna | null>(null);
 
   // AI Copilot
   const [messages, setMessages] = useState<ChatMessage[]>([
@@ -385,7 +443,7 @@ export default function HomePage() {
   const [chatInput, setChatInput] = useState('');
   const [isAiLoading, setIsAiLoading] = useState(false);
 
-  // Modals Visibility
+  // Modals
   const [showSettingsModal, setShowSettingsModal] = useState(false);
   const [showDevicesModal, setShowDevicesModal] = useState(false);
   const [showAtmosphereModal, setShowAtmosphereModal] = useState(false);
@@ -393,16 +451,23 @@ export default function HomePage() {
   // Refs
   const activeDeviceId = useRef<string | null>(null);
   const isActionPending = useRef(false);
+  const lastTrackId = useRef<string | null>(null);
+  const audioFeaturesBlocked = useRef(false);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const ambientAudioRef = useRef<HTMLAudioElement | null>(null);
   const lyricsContainerRef = useRef<HTMLDivElement | null>(null);
   const chatBottomRef = useRef<HTMLDivElement | null>(null);
   const accountMenuRef = useRef<HTMLDivElement | null>(null);
 
-  // ============================================================================
-  // SECTION 4: SERVER API WRAPPER
-  // ============================================================================
-  async function callSpotify(endpoint: string, method: string = 'GET', payload?: object) {
+  // ==========================================================================
+  // SECTION 4: SERVER API WRAPPER & DATA LOADERS
+  // ==========================================================================
+  const callSpotify = useCallback(async function <T = Record<string, unknown>>(
+    endpoint: string,
+    method: string = 'GET',
+    payload?: object,
+    silent: boolean = false
+  ): Promise<SpotifyCallResult<T>> {
     try {
       const res = await fetch('/api/spotify', {
         method: 'POST',
@@ -412,70 +477,254 @@ export default function HomePage() {
 
       if (res.status === 401) {
         setIsAuthenticated(false);
-        return null;
+        return { ok: false, status: 401, data: null, errorMessage: 'Session expired' };
+      }
+
+      if (res.status === 204) {
+        setIsAuthenticated(true);
+        return { ok: true, status: 204, data: null };
+      }
+
+      const rawData = await res.json().catch(() => null);
+
+      if (!res.ok) {
+        const errObj = rawData as { error?: { message?: string; reason?: string } | string } | null;
+        const reason = typeof errObj?.error === 'object' ? errObj.error?.reason : undefined;
+        const msg =
+          typeof errObj?.error === 'object'
+            ? errObj.error?.message || `Spotify error (${res.status})`
+            : typeof errObj?.error === 'string'
+            ? errObj.error
+            : `Spotify error (${res.status})`;
+
+        if (!silent) {
+          if (reason === 'PREMIUM_REQUIRED') {
+            setStatusBanner('Spotify Premium is required to control playback.');
+          } else if (res.status === 429) {
+            setStatusBanner('Spotify rate limit reached — lower Sync Speed in Settings.');
+          } else if (res.status !== 404) {
+            setStatusBanner(msg);
+          }
+        }
+        return { ok: false, status: res.status, data: null, errorMessage: msg };
       }
 
       setIsAuthenticated(true);
-      if (res.status === 204) return { success: true };
-      if (!res.ok) return null;
-
-      return await res.json();
+      return { ok: true, status: res.status, data: rawData as T };
     } catch (e) {
       console.warn(`Call to ${endpoint} failed:`, e);
-      return null;
+      return { ok: false, status: 0, data: null, errorMessage: 'Network error' };
+    }
+  }, []);
+
+  const loadDevices = useCallback(async () => {
+    const res = await callSpotify<{ devices?: SpotifyDevice[] }>(
+      '/me/player/devices',
+      'GET',
+      undefined,
+      true
+    );
+    if (res.ok && Array.isArray(res.data?.devices)) {
+      setDevices(res.data.devices);
+      const active = res.data.devices.find((d) => d.is_active);
+      if (active?.id) activeDeviceId.current = active.id;
+      return res.data.devices;
+    }
+    return [] as SpotifyDevice[];
+  }, [callSpotify]);
+
+  const loadPlaylists = useCallback(async () => {
+    const res = await callSpotify<{ items?: Playlist[] }>(
+      '/me/playlists?limit=25',
+      'GET',
+      undefined,
+      true
+    );
+    if (res.ok && Array.isArray(res.data?.items)) {
+      setPlaylists(res.data.items.filter(Boolean));
+    }
+  }, [callSpotify]);
+
+  const loadQueue = useCallback(async () => {
+    const res = await callSpotify<{ queue?: TrackItem[] }>(
+      '/me/player/queue',
+      'GET',
+      undefined,
+      true
+    );
+    if (res.ok && Array.isArray(res.data?.queue)) {
+      setQueue(res.data.queue.filter(Boolean).slice(0, 15));
+    }
+  }, [callSpotify]);
+
+  const fetchNowPlaying = useCallback(async () => {
+    if (isActionPending.current) return;
+    const res = await callSpotify<SpotifyPlayerApiResponse>('/me/player', 'GET', undefined, true);
+
+    if (res.ok && res.data?.item) {
+      const data = res.data;
+      if (data.device?.id) activeDeviceId.current = data.device.id;
+
+      const isPlaying = Boolean(data.is_playing);
+      const serverProgress = data.progress_ms || 0;
+      const item = data.item;
+
+      const artistName = Array.isArray(item.artists)
+        ? item.artists.map((a) => a?.name).filter(Boolean).join(', ')
+        : item.show?.name || 'Unknown Artist';
+
+      const albumName = item.album?.name || item.show?.name || '';
+      const albumCover = item.album?.images?.[0]?.url || item.show?.images?.[0]?.url || '';
+
+      setPlayback((prev) => {
+        const sameTrack = prev?.id === item.id;
+        const sameState = prev?.isPlaying === isPlaying;
+
+        if (sameTrack && sameState && prev) {
+          const drift = Math.abs(prev.progressMs - serverProgress);
+          return {
+            ...prev,
+            isPlaying,
+            progressMs: drift > 1500 ? serverProgress : prev.progressMs,
+            lastSyncTime: Date.now(),
+            device: data.device?.name || prev.device,
+          };
+        }
+
+        return {
+          id: item.id,
+          name: item.name || 'Unknown Track',
+          artist: artistName,
+          album: albumName,
+          albumArt: albumCover,
+          isPlaying,
+          progressMs: serverProgress,
+          durationMs: item.duration_ms || 1,
+          device: data.device?.name || 'Active Device',
+          lastSyncTime: Date.now(),
+        };
+      });
+    } else if (res.ok && res.status === 204) {
+      setPlayback((prev) => (prev ? { ...prev, isPlaying: false } : null));
+    }
+  }, [callSpotify]);
+
+  async function loadUserStats(timeframe: 'short_term' | 'long_term') {
+    setIsLoadingStats(true);
+    setStatsTimeframe(timeframe);
+    try {
+      const [artistRes, trackRes] = await Promise.all([
+        callSpotify<{ items?: { id: string; name: string; images?: { url: string }[] }[] }>(
+          `/me/top/artists?time_range=${timeframe}&limit=3`,
+          'GET',
+          undefined,
+          true
+        ),
+        callSpotify<{ items?: TrackItem[] }>(
+          `/me/top/tracks?time_range=${timeframe}&limit=3`,
+          'GET',
+          undefined,
+          true
+        ),
+      ]);
+
+      if (artistRes.ok && artistRes.data?.items) {
+        setTopArtists(
+          artistRes.data.items.map((a) => ({
+            id: a.id,
+            name: a.name,
+            imageUrl: a.images?.[0]?.url || '',
+          }))
+        );
+      }
+
+      if (trackRes.ok && trackRes.data?.items) {
+        setTopTracks(trackRes.data.items);
+      }
+    } finally {
+      setIsLoadingStats(false);
     }
   }
 
-  // ============================================================================
-  // SECTION 5: LIFECYCLE & BACKGROUND LOOPS
-  // ============================================================================
+  async function openPlaylistInspector(playlist: Playlist) {
+    if (!playlist?.id) return;
+    setSelectedPlaylist(playlist);
+    setIsLoadingTracks(true);
+    const res = await callSpotify<{ items?: { track?: TrackItem }[] }>(
+      `/playlists/${playlist.id}/tracks?limit=50`
+    );
+    if (res.ok && Array.isArray(res.data?.items)) {
+      setPlaylistTracks(
+        res.data.items
+          .map((item) => item?.track)
+          .filter((t): t is TrackItem => Boolean(t && t.id && t.name))
+      );
+    }
+    setIsLoadingTracks(false);
+  }
 
+  // ==========================================================================
+  // SECTION 5: LIFECYCLE & POLLING LOOPS
+  // ==========================================================================
   useEffect(() => {
-    const savedLayout = (localStorage.getItem('trackdeck_layout') as LayoutPreset) || 'studio';
-    setLayout(savedLayout === 'studio' || savedLayout === 'cinema' ? savedLayout : 'studio');
+    const params = new URLSearchParams(window.location.search);
+    const authError = params.get('error');
+    const detail = params.get('detail');
+    if (authError) {
+      setStatusBanner(`Spotify login failed (${authError})${detail ? `: ${detail}` : ''}`);
+      window.history.replaceState({}, '', '/');
+    }
 
-    const savedColor = (localStorage.getItem('trackdeck_color_theme') as ColorPreset) || 'dark';
-    setColorTheme(savedColor);
+    const savedLayout = localStorage.getItem('trackdeck_layout') as LayoutPreset;
+    if (savedLayout === 'studio' || savedLayout === 'cinema') setLayout(savedLayout);
 
-    const savedBgMode = (localStorage.getItem('trackdeck_bg_mode') as BgMode) || 'gallery';
-    setBgMode(savedBgMode);
+    const savedColor = localStorage.getItem('trackdeck_color_theme') as ColorPreset;
+    if (savedColor && THEME_CLASSES[savedColor]) setColorTheme(savedColor);
 
-    const savedGalleryUrl = localStorage.getItem('trackdeck_bg_gallery') || GALLERY_WALLPAPERS[0].url;
-    setSelectedGalleryUrl(savedGalleryUrl);
+    const savedBgMode = localStorage.getItem('trackdeck_bg_mode') as BgMode;
+    if (savedBgMode) setBgMode(savedBgMode);
 
-    const savedBgCustom = localStorage.getItem('trackdeck_bg_custom') || '';
-    setBgCustomUrl(savedBgCustom);
+    setSelectedGalleryUrl(localStorage.getItem('trackdeck_bg_gallery') || GALLERY_WALLPAPERS[0].url);
+    setBgCustomUrl(localStorage.getItem('trackdeck_bg_custom') || '');
+    setWeatherFx((localStorage.getItem('trackdeck_weather_fx') as WeatherEffect) || 'none');
+    setFxDensity(Number(localStorage.getItem('trackdeck_fx_density') ?? 50));
+    setFxSpeed(Number(localStorage.getItem('trackdeck_fx_speed') ?? 50));
+    setBgBlur(Number(localStorage.getItem('trackdeck_bg_blur') ?? 8));
+    setBgDim(Number(localStorage.getItem('trackdeck_bg_dim') ?? 45));
+    setBgPosY(Number(localStorage.getItem('trackdeck_bg_pos_y') ?? 50));
+    setBgScale(Number(localStorage.getItem('trackdeck_bg_scale') ?? 105));
 
-    const savedFx = (localStorage.getItem('trackdeck_weather_fx') as WeatherEffect) || 'none';
-    setWeatherFx(savedFx);
+    const savedCopilot = localStorage.getItem('trackdeck_copilot_enabled');
+    if (savedCopilot !== null) setCopilotEnabled(savedCopilot === 'true');
 
-    const savedDensity = Number(localStorage.getItem('trackdeck_fx_density') ?? 50);
-    setFxDensity(savedDensity);
+    try {
+      const savedSettings = localStorage.getItem('trackdeck_settings');
+      if (savedSettings) setSettings({ ...DEFAULT_SETTINGS, ...JSON.parse(savedSettings) });
+    } catch {
+      // Ignore malformed settings
+    }
 
-    const savedSpeed = Number(localStorage.getItem('trackdeck_fx_speed') ?? 50);
-    setFxSpeed(savedSpeed);
-
-    const savedBlur = Number(localStorage.getItem('trackdeck_bg_blur') ?? 8);
-    setBgBlur(savedBlur);
-
-    const savedDim = Number(localStorage.getItem('trackdeck_bg_dim') ?? 45);
-    setBgDim(savedDim);
-
-    const savedPosY = Number(localStorage.getItem('trackdeck_bg_pos_y') ?? 50);
-    setBgPosY(savedPosY);
-
-    const savedScale = Number(localStorage.getItem('trackdeck_bg_scale') ?? 105);
-    setBgScale(savedScale);
-
-    fetchNowPlaying();
-    loadPlaylists();
-    loadQueue();
-    loadDevices();
     detectLocalWeather().then(setLocalWeather);
-    loadUserProfile();
-  }, []);
 
-  // Close account popover when clicking outside
+    // Check /me FIRST so token refresh never races across 5 parallel calls
+    (async () => {
+      const meRes = await callSpotify<SpotifyMeResponse>('/me', 'GET', undefined, true);
+      if (meRes.ok && meRes.data?.display_name) {
+        setUserProfile({
+          name: meRes.data.display_name,
+          avatarUrl: meRes.data.images?.[0]?.url || '',
+          isPremium: meRes.data.product === 'premium',
+          spotifyUrl: meRes.data.external_urls?.spotify || 'https://open.spotify.com',
+        });
+        await Promise.all([fetchNowPlaying(), loadPlaylists(), loadQueue(), loadDevices()]);
+      } else if (meRes.status === 403) {
+        setStatusBanner(
+          'Spotify returned 403 Forbidden. If your app is in Dev Mode, add this email in Spotify Dashboard -> User Management.'
+        );
+      }
+    })();
+  }, [callSpotify, fetchNowPlaying, loadDevices, loadPlaylists, loadQueue]);
+
   useEffect(() => {
     function handleClickOutside(event: MouseEvent) {
       if (accountMenuRef.current && !accountMenuRef.current.contains(event.target as Node)) {
@@ -486,29 +735,31 @@ export default function HomePage() {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  // Poll Playback (1.5s)
   useEffect(() => {
-    const interval = setInterval(fetchNowPlaying, 1500);
+    if (!isAuthenticated) return;
+    const interval = setInterval(() => {
+      if (document.visibilityState === 'visible') fetchNowPlaying();
+    }, settings.pollIntervalMs);
     return () => clearInterval(interval);
-  }, []);
+  }, [isAuthenticated, settings.pollIntervalMs, fetchNowPlaying]);
 
-  // Poll Queue (10s)
   useEffect(() => {
-    const interval = setInterval(loadQueue, 10000);
+    if (!isAuthenticated) return;
+    const interval = setInterval(() => {
+      if (document.visibilityState === 'visible') loadQueue();
+    }, 10000);
     return () => clearInterval(interval);
-  }, []);
+  }, [isAuthenticated, loadQueue]);
 
-  // Scrub Ticker (500ms)
   useEffect(() => {
     if (!playback?.isPlaying) return;
     const timer = setInterval(() => {
       setPlayback((prev) => {
         if (!prev || !prev.isPlaying) return prev;
         const elapsed = Date.now() - prev.lastSyncTime;
-        const currentProgress = Math.min(prev.durationMs, prev.progressMs + elapsed);
         return {
           ...prev,
-          progressMs: currentProgress,
+          progressMs: Math.min(prev.durationMs, prev.progressMs + elapsed),
           lastSyncTime: Date.now(),
         };
       });
@@ -516,16 +767,12 @@ export default function HomePage() {
     return () => clearInterval(timer);
   }, [playback?.isPlaying]);
 
-  // Session Minutes Ticker (Only counts while music is actively playing)
   useEffect(() => {
     if (!playback?.isPlaying) return;
-    const interval = setInterval(() => {
-      setSessionMinutes((prev) => prev + 1);
-    }, 60000);
+    const interval = setInterval(() => setSessionMinutes((prev) => prev + 1), 60000);
     return () => clearInterval(interval);
   }, [playback?.isPlaying]);
 
-  // Count Songs Streamed during session
   useEffect(() => {
     if (playback?.id && playback.id !== lastTrackId.current) {
       lastTrackId.current = playback.id;
@@ -533,76 +780,101 @@ export default function HomePage() {
     }
   }, [playback?.id]);
 
-  // Ambient Audio Player Sync
   useEffect(() => {
-    if (!ambientAudioRef.current) return;
-    ambientAudioRef.current.volume = ambientVolume / 100;
+    const audio = ambientAudioRef.current;
+    if (!audio) return;
+    audio.volume = ambientVolume / 100;
     if (ambientSound === 'off') {
-      ambientAudioRef.current.pause();
+      audio.pause();
     } else {
-      ambientAudioRef.current.play().catch(() => {});
+      audio.load();
+      audio.play().catch(() => {});
     }
   }, [ambientSound, ambientVolume]);
 
-  // Fetch Lyrics & Sonic DNA on Song Change
   useEffect(() => {
     if (!playback?.name || !playback?.artist) return;
+    let cancelled = false;
 
-    fetchSyncedLyrics(playback.name, playback.artist, playback.album, playback.durationMs / 1000).then(
-      (lines) => {
+    fetchSyncedLyrics(
+      playback.name,
+      playback.artist,
+      playback.album,
+      playback.durationMs / 1000
+    ).then((lines) => {
+      if (!cancelled) {
         setLyrics(lines);
         setCurrentLyricIdx(-1);
       }
-    );
+    });
 
-    if (playback.id) {
-      callSpotify(`/audio-features/${playback.id}`).then((data) => {
-        if (data && data.tempo) {
+    if (playback.id && settings.showSonicDna && !audioFeaturesBlocked.current) {
+      callSpotify<{ tempo?: number; key?: number; mode?: number; energy?: number }>(
+        `/audio-features/${playback.id}`,
+        'GET',
+        undefined,
+        true
+      ).then((res) => {
+        if (cancelled) return;
+        if (res.status === 403) {
+          audioFeaturesBlocked.current = true;
+          setSonicDna(null);
+          return;
+        }
+        if (res.ok && res.data?.tempo) {
           const pitchClasses = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
-          const keyName = pitchClasses[data.key] || 'C';
-          const modeName = data.mode === 1 ? 'Maj' : 'Min';
           setSonicDna({
-            bpm: Math.round(data.tempo),
-            key: `${keyName} ${modeName}`,
-            energy: Math.round(data.energy * 100),
+            bpm: Math.round(res.data.tempo),
+            key: `${pitchClasses[res.data.key ?? 0] || 'C'} ${res.data.mode === 1 ? 'Maj' : 'Min'}`,
+            energy: Math.round((res.data.energy ?? 0) * 100),
           });
         } else {
           setSonicDna(null);
         }
       });
+    } else {
+      setSonicDna(null);
     }
-  }, [playback?.name, playback?.artist, playback?.id]);
 
-  // Karaoke Lyrics Scroller
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    playback?.id,
+    playback?.name,
+    playback?.artist,
+    playback?.album,
+    playback?.durationMs,
+    settings.showSonicDna,
+    callSpotify,
+  ]);
+
   useEffect(() => {
     if (!lyrics || !playback?.progressMs) return;
     const curTime = playback.progressMs;
     let activeIdx = -1;
-
     for (let i = 0; i < lyrics.length; i++) {
-      if (curTime >= lyrics[i].timeMs) {
-        activeIdx = i;
-      } else {
-        break;
-      }
+      if (curTime >= lyrics[i].timeMs) activeIdx = i;
+      else break;
     }
 
     if (activeIdx !== currentLyricIdx) {
       setCurrentLyricIdx(activeIdx);
-      const activeEl = document.getElementById(`lyric-line-${activeIdx}`);
-      if (activeEl) {
-        activeEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      if (settings.autoScrollLyrics) {
+        document
+          .getElementById(`lyric-line-${activeIdx}`)
+          ?.scrollIntoView({ behavior: 'smooth', block: 'center' });
       }
     }
-  }, [playback?.progressMs, lyrics, currentLyricIdx]);
+  }, [playback?.progressMs, lyrics, currentLyricIdx, settings.autoScrollLyrics]);
 
   useEffect(() => {
     chatBottomRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
-  // ============================================================================
+  // ==========================================================================
   // SECTION 6: CANVAS WEATHER SHADER ENGINE
-  // ============================================================================
+  // ==========================================================================
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -618,7 +890,6 @@ export default function HomePage() {
     }
 
     let animId: number;
-
     const handleResize = () => {
       if (!canvas) return;
       width = canvas.width = window.innerWidth;
@@ -631,7 +902,6 @@ export default function HomePage() {
 
     const snowFlakes: SnowParticle[] = [];
     const totalFlakes = Math.floor(180 * densityMult);
-
     for (let i = 0; i < totalFlakes; i++) {
       const rand = Math.random();
       if (rand < 0.65) {
@@ -708,15 +978,13 @@ export default function HomePage() {
             grad.addColorStop(0.55, `rgba(240, 248, 255, ${f.alpha * 0.5})`);
             grad.addColorStop(1, 'rgba(240, 248, 255, 0)');
             ctx.fillStyle = grad;
-            ctx.beginPath();
-            ctx.arc(f.x, f.y, f.radius, 0, Math.PI * 2);
-            ctx.fill();
           } else {
             ctx.fillStyle = `rgba(242, 247, 255, ${f.alpha})`;
-            ctx.beginPath();
-            ctx.arc(f.x, f.y, f.radius, 0, Math.PI * 2);
-            ctx.fill();
           }
+
+          ctx.beginPath();
+          ctx.arc(f.x, f.y, f.radius, 0, Math.PI * 2);
+          ctx.fill();
 
           if (f.y > height + 10) {
             f.y = -10;
@@ -783,72 +1051,27 @@ export default function HomePage() {
     };
 
     render();
-
     return () => {
       cancelAnimationFrame(animId);
       window.removeEventListener('resize', handleResize);
     };
   }, [weatherFx, fxDensity, fxSpeed]);
 
-  // ============================================================================
-  // SECTION 7: PROFILE & MUSIC STATS LOADERS
-  // ============================================================================
-
-  async function loadUserProfile() {
-    const data = await callSpotify('/me');
-    if (data && data.display_name) {
-      setUserProfile({
-        name: data.display_name,
-        avatarUrl: data.images?.[0]?.url || '',
-        isPremium: data.product === 'premium',
-        spotifyUrl: data.external_urls?.spotify || 'https://open.spotify.com',
-      });
+  // ==========================================================================
+  // SECTION 7: PLAYBACK & DEVICE CONTROLS
+  // ==========================================================================
+  async function ensureActiveDeviceOrWake(): Promise<string | null> {
+    if (activeDeviceId.current) return activeDeviceId.current;
+    const found = await loadDevices();
+    if (found.length > 0 && settings.autoWakeDevice) {
+      const target = found[0];
+      activeDeviceId.current = target.id;
+      await callSpotify('/me/player', 'PUT', { device_ids: [target.id], play: true });
+      setStatusBanner(`Waking up ${target.name}...`);
+      return target.id;
     }
-  }
-
-  async function loadUserStats(timeframe: 'short_term' | 'long_term') {
-    setIsLoadingStats(true);
-    setStatsTimeframe(timeframe);
-
-    try {
-      // Top Artists
-      const artistData = await callSpotify(`/me/top/artists?time_range=${timeframe}&limit=3`);
-      if (artistData?.items) {
-        setTopArtists(
-          artistData.items.map((a: { id: string; name: string; images?: { url: string }[] }) => ({
-            id: a.id,
-            name: a.name,
-            imageUrl: a.images?.[0]?.url || '',
-          }))
-        );
-      }
-
-      // Top Tracks
-      const trackData = await callSpotify(`/me/top/tracks?time_range=${timeframe}&limit=3`);
-      if (trackData?.items) {
-        setTopTracks(
-          trackData.items.map((t: TrackItem) => ({
-            id: t.id,
-            name: t.name,
-            artists: t.artists,
-            album: t.album,
-            duration_ms: t.duration_ms,
-            uri: t.uri,
-          }))
-        );
-      }
-    } finally {
-      setIsLoadingStats(false);
-    }
-  }
-
-  async function loadDevices() {
-    const data = await callSpotify('/me/player/devices');
-    if (data?.devices && Array.isArray(data.devices)) {
-      setDevices(data.devices);
-      const active = data.devices.find((d: SpotifyDevice) => d.is_active);
-      if (active?.id) activeDeviceId.current = active.id;
-    }
+    setStatusBanner('No active Spotify device found. Open Spotify once on your phone or PC.');
+    return null;
   }
 
   async function handleTransferDevice(devId: string) {
@@ -863,112 +1086,34 @@ export default function HomePage() {
     }, 800);
   }
 
-  async function loadPlaylists() {
-    const data = await callSpotify('/me/playlists?limit=25');
-    if (data?.items && Array.isArray(data.items)) {
-      setPlaylists(data.items.filter(Boolean));
-    }
-  }
-
-  async function loadQueue() {
-    const data = await callSpotify('/me/player/queue');
-    if (data?.queue && Array.isArray(data.queue)) {
-      setQueue(data.queue.filter(Boolean).slice(0, 15));
-    }
-  }
-
-  async function openPlaylistInspector(playlist: Playlist) {
-    if (!playlist?.id) return;
-    setSelectedPlaylist(playlist);
-    setIsLoadingTracks(true);
-    const data = await callSpotify(`/playlists/${playlist.id}/tracks?limit=50`);
-    if (data?.items && Array.isArray(data.items)) {
-      setPlaylistTracks(
-        data.items
-          .map((item: { track?: TrackItem }) => item?.track)
-          .filter((t: TrackItem | null | undefined): t is TrackItem => Boolean(t && t.id && t.name))
-      );
-    }
-    setIsLoadingTracks(false);
-  }
-
-  async function fetchNowPlaying() {
-    if (isActionPending.current) return;
-    const data = await callSpotify('/me/player');
-
-    if (data && data.item) {
-      if (data.device?.id) {
-        activeDeviceId.current = data.device.id;
-      }
-
-      const isPlaying = Boolean(data.is_playing);
-      const serverProgress = data.progress_ms || 0;
-
-      const artistName = Array.isArray(data.item.artists)
-        ? data.item.artists.map((a: { name: string }) => a?.name).filter(Boolean).join(', ')
-        : data.item.show?.name || 'Unknown Artist';
-
-      const albumName = data.item.album?.name || data.item.show?.name || '';
-      const albumCover =
-        data.item.album?.images?.[0]?.url || data.item.show?.images?.[0]?.url || '';
-
-      setPlayback((prev) => {
-        const sameTrack = prev?.name === data.item.name;
-        const sameState = prev?.isPlaying === isPlaying;
-
-        if (sameTrack && sameState && prev) {
-          const drift = Math.abs(prev.progressMs - serverProgress);
-          return {
-            ...prev,
-            id: data.item.id,
-            isPlaying,
-            progressMs: drift > 1500 ? serverProgress : prev.progressMs,
-            lastSyncTime: Date.now(),
-            device: data.device?.name || prev.device,
-          };
-        }
-
-        const fresh = {
-          id: data.item.id,
-          name: data.item.name || 'Unknown Track',
-          artist: artistName,
-          album: albumName,
-          albumArt: albumCover,
-          isPlaying,
-          progressMs: serverProgress,
-          durationMs: data.item.duration_ms || 1,
-          device: data.device?.name || 'Active Device',
-          lastSyncTime: Date.now(),
-        };
-        localStorage.setItem('trackdeck_cached_track', JSON.stringify(fresh));
-        return fresh;
-      });
-    } else {
-      setPlayback((prev) => (prev ? { ...prev, isPlaying: false } : null));
-    }
-  }
-
-  // ============================================================================
-  // SECTION 8: PLAYBACK CONTROLS
-  // ============================================================================
-
   async function togglePlay() {
     if (!isAuthenticated) {
       window.location.href = '/api/auth/login';
       return;
     }
-    if (!playback) return;
+    if (!playback) {
+      const wokeId = await ensureActiveDeviceOrWake();
+      if (wokeId) setTimeout(fetchNowPlaying, 800);
+      return;
+    }
 
     const targetState = !playback.isPlaying;
     const devParam = activeDeviceId.current ? `?device_id=${activeDeviceId.current}` : '';
     isActionPending.current = true;
-    setPlayback((prev) => (prev ? { ...prev, isPlaying: targetState, lastSyncTime: Date.now() } : null));
+    setPlayback((prev) =>
+      prev ? { ...prev, isPlaying: targetState, lastSyncTime: Date.now() } : null
+    );
 
-    await callSpotify(`/me/player/${targetState ? 'play' : 'pause'}${devParam}`, 'PUT');
+    const res = await callSpotify(`/me/player/${targetState ? 'play' : 'pause'}${devParam}`, 'PUT');
+    if (res.status === 404 && targetState) {
+      const wokeId = await ensureActiveDeviceOrWake();
+      if (wokeId) await callSpotify(`/me/player/play?device_id=${wokeId}`, 'PUT');
+    }
+
     setTimeout(() => {
       isActionPending.current = false;
       fetchNowPlaying();
-    }, 400);
+    }, 450);
   }
 
   async function handleNext() {
@@ -994,26 +1139,33 @@ export default function HomePage() {
     }, 500);
   }
 
-  async function handleSeek(e: React.MouseEvent<HTMLDivElement>) {
+  async function seekToMs(newPosMs: number) {
     if (!isAuthenticated || !playback) return;
-    const rect = e.currentTarget.getBoundingClientRect();
-    const ratio = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
-    const newPosMs = Math.floor(ratio * playback.durationMs);
-    const devParam = activeDeviceId.current ? `?device_id=${activeDeviceId.current}` : '';
-
+    const devParam = activeDeviceId.current
+      ? `&device_id=${encodeURIComponent(activeDeviceId.current)}`
+      : '';
     isActionPending.current = true;
-    setPlayback((prev) => (prev ? { ...prev, progressMs: newPosMs, lastSyncTime: Date.now() } : null));
-
-    await callSpotify(`/me/player/seek?position_ms=${newPosMs}${devParam}`, 'PUT');
+    setPlayback((prev) =>
+      prev ? { ...prev, progressMs: newPosMs, lastSyncTime: Date.now() } : null
+    );
+    await callSpotify(`/me/player/seek?position_ms=${Math.floor(newPosMs)}${devParam}`, 'PUT');
     setTimeout(() => {
       isActionPending.current = false;
       fetchNowPlaying();
     }, 500);
   }
 
+  function handleSeek(e: React.MouseEvent<HTMLDivElement>) {
+    if (!playback) return;
+    const rect = e.currentTarget.getBoundingClientRect();
+    const ratio = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+    seekToMs(Math.floor(ratio * playback.durationMs));
+  }
+
   async function handlePlayTrack(trackUri: string) {
     if (!isAuthenticated || !trackUri) return;
-    const devParam = activeDeviceId.current ? `?device_id=${activeDeviceId.current}` : '';
+    const devId = activeDeviceId.current || (await ensureActiveDeviceOrWake());
+    const devParam = devId ? `?device_id=${devId}` : '';
     await callSpotify(`/me/player/play${devParam}`, 'PUT', { uris: [trackUri] });
     setTimeout(() => {
       fetchNowPlaying();
@@ -1023,14 +1175,20 @@ export default function HomePage() {
 
   async function handleAddToQueue(track: TrackItem) {
     if (!isAuthenticated || !track?.uri) return;
-    await callSpotify(`/me/player/queue?uri=${encodeURIComponent(track.uri)}`, 'POST');
-    setQueue((prev) => [track, ...prev]);
-    setTimeout(loadQueue, 800);
+    const res = await callSpotify(
+      `/me/player/queue?uri=${encodeURIComponent(track.uri)}`,
+      'POST'
+    );
+    if (res.ok) {
+      setQueue((prev) => [track, ...prev]);
+      setTimeout(loadQueue, 800);
+    }
   }
 
   async function handlePlayPlaylist(playlistUri: string) {
     if (!isAuthenticated || !playlistUri) return;
-    const devParam = activeDeviceId.current ? `?device_id=${activeDeviceId.current}` : '';
+    const devId = activeDeviceId.current || (await ensureActiveDeviceOrWake());
+    const devParam = devId ? `?device_id=${devId}` : '';
     await callSpotify(`/me/player/play${devParam}`, 'PUT', { context_uri: playlistUri });
     setTimeout(() => {
       fetchNowPlaying();
@@ -1038,25 +1196,26 @@ export default function HomePage() {
     }, 800);
   }
 
-  // ============================================================================
-  // SECTION 9: AI COPILOT DISPATCHER
-  // ============================================================================
-
+  // ==========================================================================
+  // SECTION 8: AI COPILOT & SETTINGS CONTROLLERS
+  // ==========================================================================
   async function executeCopilotCommand(copilot: CopilotResponse) {
     const { command, query } = copilot;
-    if (!command) return;
+    if (!command || !isAuthenticated) return;
 
     isActionPending.current = true;
-    const deviceId = activeDeviceId.current || undefined;
-    const devParam = deviceId ? `?device_id=${deviceId}` : '';
+    const devId = activeDeviceId.current || (await ensureActiveDeviceOrWake());
+    const devParam = devId ? `?device_id=${devId}` : '';
 
     try {
       if (command === 'play') {
-        const isGeneric = !query || /^(play|music|song|the song|it|unpause|resume|track)$/i.test(query.trim());
-
+        const isGeneric =
+          !query || /^(play|music|song|the song|it|unpause|resume|track)$/i.test(query.trim());
         if (!isGeneric && query) {
-          const searchRes = await callSpotify(`/search?q=${encodeURIComponent(query)}&type=track&limit=5`);
-          const track = searchRes?.tracks?.items?.[0];
+          const searchRes = await callSpotify<{ tracks?: { items?: TrackItem[] } }>(
+            `/search?q=${encodeURIComponent(query)}&type=track&limit=5`
+          );
+          const track = searchRes.data?.tracks?.items?.[0];
           if (track?.uri) {
             await callSpotify(`/me/player/play${devParam}`, 'PUT', { uris: [track.uri] });
           }
@@ -1066,8 +1225,10 @@ export default function HomePage() {
       }
 
       if (command === 'queue' && query) {
-        const searchRes = await callSpotify(`/search?q=${encodeURIComponent(query)}&type=track&limit=1`);
-        const track = searchRes?.tracks?.items?.[0];
+        const searchRes = await callSpotify<{ tracks?: { items?: TrackItem[] } }>(
+          `/search?q=${encodeURIComponent(query)}&type=track&limit=1`
+        );
+        const track = searchRes.data?.tracks?.items?.[0];
         if (track?.uri) {
           await callSpotify(`/me/player/queue?uri=${encodeURIComponent(track.uri)}`, 'POST');
           setQueue((prev) => [track, ...prev]);
@@ -1086,66 +1247,82 @@ export default function HomePage() {
     }
   }
 
-  async function sendToGemini(textToSend: string) {
-    if (!textToSend.trim() || isAiLoading) return;
-
-    setMessages((prev) => [...prev, { role: 'user', text: textToSend }]);
+  async function handleFormSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!copilotEnabled || !chatInput.trim() || isAiLoading) return;
+    const msg = chatInput.trim();
+    setChatInput('');
+    setMessages((prev) => [...prev, { role: 'user', text: msg }]);
     setIsAiLoading(true);
 
     try {
-      const response = await askGemini(textToSend, messages, playback);
-      if (response.command) {
-        executeCopilotCommand(response);
-      }
+      const response = await askGemini(msg, messages, playback);
+      if (response.command) await executeCopilotCommand(response);
       setMessages((prev) => [...prev, { role: 'model', text: response.message }]);
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : 'Error reaching Copilot';
-      setMessages((prev) => [
-        ...prev,
-        { role: 'model', text: `⚠️ Copilot error: (${msg}). Check your server keys.` },
-      ]);
+      const errText = err instanceof Error ? err.message : 'Error reaching Copilot';
+      setMessages((prev) => [...prev, { role: 'model', text: `Copilot error: ${errText}` }]);
     } finally {
       setIsAiLoading(false);
     }
   }
 
-  function handleFormSubmit(e: React.FormEvent) {
-    e.preventDefault();
-    if (!chatInput.trim()) return;
-    const msg = chatInput;
-    setChatInput('');
-    sendToGemini(msg);
+  function toggleCopilot(enabled: boolean) {
+    setCopilotEnabled(enabled);
+    localStorage.setItem('trackdeck_copilot_enabled', String(enabled));
   }
 
-  // ============================================================================
-  // SECTION 10: ATMOSPHERE CONTROLLERS
-  // ============================================================================
+  function updateSetting<K extends keyof AppSettings>(key: K, value: AppSettings[K]) {
+    setSettings((prev) => {
+      const next = { ...prev, [key]: value };
+      localStorage.setItem('trackdeck_settings', JSON.stringify(next));
+      return next;
+    });
+  }
 
+  function resetPreferences() {
+    setSettings(DEFAULT_SETTINGS);
+    setLayout('studio');
+    setColorTheme('dark');
+    setBgMode('gallery');
+    setSelectedGalleryUrl(GALLERY_WALLPAPERS[0].url);
+    setWeatherFx('none');
+    setAmbientSound('off');
+    setBgBlur(8);
+    setBgDim(45);
+    setBgPosY(50);
+    setBgScale(105);
+    Object.keys(localStorage)
+      .filter((k) => k.startsWith('trackdeck_'))
+      .forEach((k) => localStorage.removeItem(k));
+    setStatusBanner('TrackDeck preferences reset to defaults.');
+  }
+
+  // ==========================================================================
+  // SECTION 9: ATMOSPHERE CONTROLLERS & HELPERS
+  // ==========================================================================
   async function applyChameleonReality() {
     setIsDetectingWeather(true);
     const report = await detectLocalWeather();
     setLocalWeather(report);
-
     setBgMode('gallery');
     setSelectedGalleryUrl(report.recommendedBgUrl);
     setWeatherFx(report.effect);
     setBgDim(50);
     setBgBlur(8);
-
     localStorage.setItem('trackdeck_bg_mode', 'gallery');
     localStorage.setItem('trackdeck_bg_gallery', report.recommendedBgUrl);
     localStorage.setItem('trackdeck_weather_fx', report.effect);
     setIsDetectingWeather(false);
   }
 
-  function applyVibePreset(preset: typeof VIBE_PRESETS[0]) {
+  function applyVibePreset(preset: (typeof VIBE_PRESETS)[0]) {
     setBgMode('gallery');
     setSelectedGalleryUrl(preset.url);
     setWeatherFx(preset.effect);
     setAmbientSound(preset.sound);
     setBgBlur(preset.blur);
     setBgDim(preset.dim);
-
     localStorage.setItem('trackdeck_bg_mode', 'gallery');
     localStorage.setItem('trackdeck_bg_gallery', preset.url);
     localStorage.setItem('trackdeck_weather_fx', preset.effect);
@@ -1175,7 +1352,6 @@ export default function HomePage() {
   function handleImageUpload(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (!file) return;
-
     const reader = new FileReader();
     reader.onload = (event) => {
       const img = new Image();
@@ -1195,10 +1371,8 @@ export default function HomePage() {
         }
         canvas.width = w;
         canvas.height = h;
-        const ctx = canvas.getContext('2d');
-        ctx?.drawImage(img, 0, 0, w, h);
+        canvas.getContext('2d')?.drawImage(img, 0, 0, w, h);
         const compressed = canvas.toDataURL('image/jpeg', 0.8);
-
         setBgCustomUrl(compressed);
         setBgMode('custom');
         localStorage.setItem('trackdeck_bg_custom', compressed);
@@ -1210,7 +1384,7 @@ export default function HomePage() {
   }
 
   function formatTime(ms: number) {
-    const totalSecs = Math.floor(ms / 1000);
+    const totalSecs = Math.max(0, Math.floor(ms / 1000));
     const mins = Math.floor(totalSecs / 60);
     const secs = totalSecs % 60;
     return `${mins}:${secs < 10 ? '0' : ''}${secs}`;
@@ -1219,9 +1393,7 @@ export default function HomePage() {
   const progressPercent = playback
     ? Math.min(100, Math.max(0, (playback.progressMs / playback.durationMs) * 100))
     : 0;
-
   const theme = THEME_CLASSES[colorTheme];
-
   const activeBgImage =
     bgMode === 'custom' && bgCustomUrl
       ? bgCustomUrl
@@ -1229,30 +1401,31 @@ export default function HomePage() {
       ? selectedGalleryUrl
       : playback?.albumArt || '';
 
-  // ============================================================================
-  // SECTION 11: MAIN JSX RENDER
-  // ============================================================================
+  // ==========================================================================
+  // SECTION 10: MAIN JSX RENDER
+  // ==========================================================================
   return (
     <div
       className={`h-screen w-screen overflow-hidden flex flex-col font-sans select-none transition-colors duration-500 ${theme.root}`}
     >
       <audio ref={ambientAudioRef} src={AMBIENT_SOUND_URLS[ambientSound]} loop preload="auto" />
 
-      {/* 11.A: BACKGROUND & WEATHER CANVAS (Z-0) */}
-      {activeBgImage && (
+      {/* 10.A: BACKGROUND & WEATHER CANVAS */}
+      {(activeBgImage || weatherFx !== 'none') && (
         <div className="fixed inset-0 pointer-events-none z-0 overflow-hidden">
-          <div
-            className="absolute inset-0 transition-all duration-700"
-            style={{
-              backgroundImage: `url(${activeBgImage})`,
-              backgroundPosition: `center ${bgPosY}%`,
-              backgroundSize: `${bgScale}%`,
-              backgroundRepeat: 'no-repeat',
-              filter: `blur(${bgBlur}px)`,
-              transform: 'scale(1.1)',
-            }}
-          />
-
+          {activeBgImage && (
+            <div
+              className="absolute inset-0 transition-all duration-700"
+              style={{
+                backgroundImage: `url(${activeBgImage})`,
+                backgroundPosition: `center ${bgPosY}%`,
+                backgroundSize: `${bgScale}%`,
+                backgroundRepeat: 'no-repeat',
+                filter: `blur(${bgBlur}px)`,
+                transform: 'scale(1.1)',
+              }}
+            />
+          )}
           <div
             className="absolute inset-0 transition-opacity duration-500"
             style={{
@@ -1260,14 +1433,13 @@ export default function HomePage() {
               opacity: bgDim / 100,
             }}
           />
-
           <canvas ref={canvasRef} className="absolute inset-0 pointer-events-none z-0" />
-
           {weatherFx === 'scanlines' && (
             <div
               className="absolute inset-0 pointer-events-none opacity-20 z-0"
               style={{
-                backgroundImage: 'linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.45) 50%)',
+                backgroundImage:
+                  'linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.45) 50%)',
                 backgroundSize: '100% 4px',
               }}
             />
@@ -1275,18 +1447,28 @@ export default function HomePage() {
         </div>
       )}
 
-      {/* 11.B: TOP NAVBAR */}
+      {/* 10.B: TOP NAVBAR */}
       <header
-        className={`relative z-30 h-12 border-b px-5 flex items-center justify-between shrink-0 backdrop-blur-2xl transition-colors duration-300 ${theme.topBar}`}
+        className={`relative z-30 h-12 border-b px-4 md:px-5 flex items-center justify-between shrink-0 backdrop-blur-2xl transition-colors duration-300 ${theme.topBar}`}
       >
         <div className="flex items-center gap-2">
-          {/* AI Status */}
-          <span className="text-[11px] font-medium px-3 py-1 rounded-full border border-emerald-500/30 bg-emerald-500/10 text-emerald-400 flex items-center gap-1.5">
-            <Sparkles className="w-3 h-3 text-emerald-500" />
-            <span>Copilot Active</span>
-          </span>
+          <button
+            onClick={() => toggleCopilot(!copilotEnabled)}
+            title={copilotEnabled ? 'Click to disconnect Copilot' : 'Click to reconnect Copilot'}
+            className={`text-[11px] font-medium px-3 py-1 rounded-full border flex items-center gap-1.5 transition-colors ${
+              copilotEnabled
+                ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20'
+                : 'border-zinc-500/30 bg-white/5 text-zinc-400 hover:text-zinc-200'
+            }`}
+          >
+            <Sparkles
+              className={`w-3 h-3 ${copilotEnabled ? 'text-emerald-500' : 'text-zinc-500'}`}
+            />
+            <span className="hidden sm:inline">
+              {copilotEnabled ? 'Copilot Active' : 'Copilot Off'}
+            </span>
+          </button>
 
-          {/* Device Selector Pill */}
           {isAuthenticated ? (
             <button
               onClick={() => {
@@ -1300,17 +1482,15 @@ export default function HomePage() {
               <span className="truncate max-w-[130px]">{playback?.device || 'Select Device'}</span>
             </button>
           ) : (
-            <span className="text-[11px] font-mono opacity-50 px-3 py-1 rounded-full border border-white/5">
+            <span className="text-[11px] font-mono opacity-50 px-3 py-1 rounded-full border border-white/10">
               Guest Mode
             </span>
           )}
         </div>
 
-        {/* Center Brand & Real-Time Weather */}
         <div className="flex items-center gap-2.5">
           <Disc3 className="w-4 h-4 text-emerald-500 animate-[spin_10s_linear_infinite]" />
           <h1 className="font-bold text-xs tracking-widest uppercase font-mono">TrackDeck</h1>
-
           {localWeather && (
             <span className="hidden md:inline-flex items-center gap-1 text-[10px] font-mono opacity-60 bg-white/5 border border-white/10 px-2 py-0.5 rounded-full">
               <Compass className="w-2.5 h-2.5 text-emerald-400" />
@@ -1319,29 +1499,25 @@ export default function HomePage() {
           )}
         </div>
 
-        {/* Right Actions */}
         <div className="flex items-center gap-1.5 relative" ref={accountMenuRef}>
           {!isAuthenticated && (
             <a
               href="/api/auth/login"
               className="text-[11px] font-bold px-3.5 py-1 rounded-full bg-[#1DB954] hover:bg-[#1ed760] text-black transition-all flex items-center gap-1 shadow-sm mr-1"
-              title="Connect Spotify Account"
             >
               <Music2 className="w-3 h-3 fill-current" />
               <span>Connect</span>
             </a>
           )}
 
-          {/* Atmosphere Palette Button */}
           <button
             onClick={() => setShowAtmosphereModal(true)}
             title="Atmosphere Studio & FX"
-            className="p-1.5 rounded-lg hover:bg-white/10 transition-colors flex items-center gap-1 text-xs"
+            className="p-1.5 rounded-lg hover:bg-white/10 transition-colors"
           >
             <Palette className="w-4 h-4 text-emerald-500" />
           </button>
 
-          {/* Settings Gear */}
           <button
             onClick={() => setShowSettingsModal(true)}
             title="Settings"
@@ -1350,58 +1526,67 @@ export default function HomePage() {
             <Settings className="w-4 h-4 opacity-70 hover:opacity-100" />
           </button>
 
-          {/* Account Profile Button (Opens 2-Stage Menu) */}
           <button
             onClick={() => {
               setShowAccountMenu((prev) => !prev);
-              setAccountView('profile'); // Reset to clean stage 1
+              setAccountView('profile');
             }}
-            title="Account & Stats"
+            title="Account, Disconnects & Mini-Wrapped"
             className="p-1 rounded-full hover:ring-2 hover:ring-emerald-500/50 transition-all flex items-center justify-center overflow-hidden"
           >
             {userProfile?.avatarUrl ? (
-              <img src={userProfile.avatarUrl} alt={userProfile.name} className="w-6 h-6 rounded-full object-cover" />
+              <img
+                src={userProfile.avatarUrl}
+                alt={userProfile.name}
+                className="w-6 h-6 rounded-full object-cover"
+              />
             ) : (
-              <div className="w-6 h-6 rounded-full bg-white/10 flex items-center justify-center text-zinc-300">
-                <User className="w-3.5 h-3.5" />
+              <div className="w-6 h-6 rounded-full bg-white/10 flex items-center justify-center">
+                <User className="w-3.5 h-3.5 opacity-80" />
               </div>
             )}
           </button>
 
-          {/* ============================================================== */}
-          {/* THE 2-STAGE ACCOUNT & MINI-WRAPPED DROPDOWN MENU                */}
-          {/* ============================================================== */}
+          {/* 2-STAGE ACCOUNT & MINI-WRAPPED MENU */}
           {showAccountMenu && (
             <div
               className={`absolute top-12 right-0 w-80 rounded-2xl shadow-2xl border p-4 backdrop-blur-3xl z-50 transition-all ${theme.modal}`}
             >
-              {/* STAGE 1: CLEAN PROFILE CARD */}
               {accountView === 'profile' ? (
-                <div className="space-y-4">
-                  {/* User Header */}
+                <div className="space-y-3.5">
                   <div className="flex items-center gap-3 pb-3 border-b border-inherit">
                     {userProfile?.avatarUrl ? (
-                      <img src={userProfile.avatarUrl} alt={userProfile.name} className="w-12 h-12 rounded-full object-cover shadow-md shrink-0" />
+                      <img
+                        src={userProfile.avatarUrl}
+                        alt={userProfile.name}
+                        className="w-12 h-12 rounded-full object-cover shadow-md shrink-0"
+                      />
                     ) : (
-                      <div className="w-12 h-12 rounded-full bg-white/10 flex items-center justify-center text-zinc-300 shrink-0">
-                        <User className="w-6 h-6" />
+                      <div className="w-12 h-12 rounded-full bg-white/10 flex items-center justify-center shrink-0">
+                        <User className="w-6 h-6 opacity-80" />
                       </div>
                     )}
                     <div className="truncate flex-1">
-                      <h4 className="font-bold text-sm text-white truncate">
-                        {userProfile?.name || (isAuthenticated ? 'Spotify Connected' : 'Guest Listener')}
+                      <h4 className="font-bold text-sm truncate">
+                        {userProfile?.name ||
+                          (isAuthenticated ? 'Spotify Connected' : 'Guest Listener')}
                       </h4>
-                      <p className="text-[11px] text-zinc-400">
+                      <p className="text-[11px] opacity-70">
                         {isAuthenticated ? (
-                          <span className="text-emerald-400 font-medium">● Premium Active</span>
+                          userProfile?.isPremium ? (
+                            <span className="text-emerald-400 font-medium">● Spotify Premium</span>
+                          ) : (
+                            <span className="text-amber-400 font-medium">
+                              ● Free Account (Read-Only)
+                            </span>
+                          )
                         ) : (
-                          'Offline Mode'
+                          'Offline / Guest Mode'
                         )}
                       </p>
                     </div>
                   </div>
 
-                  {/* Button to unlock Stats */}
                   {isAuthenticated ? (
                     <button
                       onClick={() => {
@@ -1424,37 +1609,90 @@ export default function HomePage() {
                     </a>
                   )}
 
-                  {/* Actions Bar */}
-                  <div className="pt-2 border-t border-inherit flex items-center justify-between text-xs">
-                    {userProfile?.spotifyUrl && (
+                  {/* Service Disconnect / Reconnect Controls */}
+                  <div className="space-y-1.5 pt-1">
+                    <p className="text-[10px] font-mono uppercase tracking-wider opacity-50">
+                      Connected Services
+                    </p>
+
+                    <div className="flex items-center justify-between p-2.5 rounded-xl bg-white/5 border border-white/10 text-xs">
+                      <div className="flex items-center gap-2">
+                        <Sparkles
+                          className={`w-3.5 h-3.5 ${
+                            copilotEnabled ? 'text-emerald-400' : 'opacity-40'
+                          }`}
+                        />
+                        <div>
+                          <p className="font-semibold">AI Copilot</p>
+                          <p className="text-[10px] opacity-60">
+                            {copilotEnabled ? 'Gemini 3.8 Flash Active' : 'Disconnected'}
+                          </p>
+                        </div>
+                      </div>
+                      <button
+                        onClick={() => toggleCopilot(!copilotEnabled)}
+                        className={`px-2.5 py-1 rounded-lg text-[11px] font-bold flex items-center gap-1 transition-colors ${
+                          copilotEnabled
+                            ? 'bg-rose-500/15 hover:bg-rose-500/25 text-rose-300'
+                            : 'bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300'
+                        }`}
+                      >
+                        <Power className="w-3 h-3" />
+                        {copilotEnabled ? 'Disconnect' : 'Connect'}
+                      </button>
+                    </div>
+
+                    <div className="flex items-center justify-between p-2.5 rounded-xl bg-white/5 border border-white/10 text-xs">
+                      <div className="flex items-center gap-2">
+                        <Music2
+                          className={`w-3.5 h-3.5 ${
+                            isAuthenticated ? 'text-[#1DB954]' : 'opacity-40'
+                          }`}
+                        />
+                        <div>
+                          <p className="font-semibold">Spotify</p>
+                          <p className="text-[10px] opacity-60">
+                            {isAuthenticated ? 'Session Cookie Active' : 'Not Connected'}
+                          </p>
+                        </div>
+                      </div>
+                      {isAuthenticated ? (
+                        <a
+                          href="/api/auth/logout"
+                          className="px-2.5 py-1 rounded-lg text-[11px] font-bold bg-rose-500/15 hover:bg-rose-500/25 text-rose-300 flex items-center gap-1 transition-colors"
+                        >
+                          <LogOut className="w-3 h-3" /> Log Out
+                        </a>
+                      ) : (
+                        <a
+                          href="/api/auth/login"
+                          className="px-2.5 py-1 rounded-lg text-[11px] font-bold bg-[#1DB954] hover:bg-[#1ed760] text-black flex items-center gap-1 transition-colors"
+                        >
+                          <LogIn className="w-3 h-3" /> Connect
+                        </a>
+                      )}
+                    </div>
+                  </div>
+
+                  {userProfile?.spotifyUrl && (
+                    <div className="pt-2 border-t border-inherit flex items-center justify-between text-xs">
                       <a
                         href={userProfile.spotifyUrl}
                         target="_blank"
                         rel="noreferrer"
-                        className="text-zinc-400 hover:text-white flex items-center gap-1 transition-colors"
+                        className="opacity-70 hover:opacity-100 flex items-center gap-1 transition-opacity"
                       >
-                        Profile <ExternalLink className="w-3 h-3" />
+                        Open Spotify Profile <ExternalLink className="w-3 h-3" />
                       </a>
-                    )}
-
-                    {isAuthenticated && (
-                      <a
-                        href="/api/auth/logout"
-                        className="text-rose-400 hover:text-rose-300 flex items-center gap-1 transition-colors font-medium ml-auto"
-                      >
-                        <LogOut className="w-3.5 h-3.5" /> Log Out
-                      </a>
-                    )}
-                  </div>
+                    </div>
+                  )}
                 </div>
               ) : (
-                /* STAGE 2: EXPANDED STATS & MINI-WRAPPED */
                 <div className="space-y-3.5">
-                  {/* Top Bar with Back Arrow */}
                   <div className="flex items-center justify-between pb-2 border-b border-inherit">
                     <button
                       onClick={() => setAccountView('profile')}
-                      className="text-xs text-zinc-400 hover:text-white flex items-center gap-1 font-medium transition-colors"
+                      className="text-xs opacity-70 hover:opacity-100 flex items-center gap-1 font-medium"
                     >
                       <ArrowLeft className="w-3.5 h-3.5" /> Back
                     </button>
@@ -1463,12 +1701,13 @@ export default function HomePage() {
                     </span>
                   </div>
 
-                  {/* Timeframe Toggle: 4 Weeks vs All-Time */}
                   <div className="grid grid-cols-2 gap-1.5 p-1 bg-black/30 rounded-xl border border-white/10">
                     <button
                       onClick={() => loadUserStats('short_term')}
                       className={`py-1 text-[10px] font-bold rounded-lg transition-all ${
-                        statsTimeframe === 'short_term' ? theme.accentBtn : 'text-zinc-400 hover:text-white'
+                        statsTimeframe === 'short_term'
+                          ? theme.accentBtn
+                          : 'opacity-60 hover:opacity-100'
                       }`}
                     >
                       Past 4 Weeks
@@ -1476,38 +1715,54 @@ export default function HomePage() {
                     <button
                       onClick={() => loadUserStats('long_term')}
                       className={`py-1 text-[10px] font-bold rounded-lg transition-all ${
-                        statsTimeframe === 'long_term' ? theme.accentBtn : 'text-zinc-400 hover:text-white'
+                        statsTimeframe === 'long_term'
+                          ? theme.accentBtn
+                          : 'opacity-60 hover:opacity-100'
                       }`}
                     >
                       All-Time
                     </button>
                   </div>
 
-                  {/* Stats Content */}
                   {isLoadingStats ? (
-                    <div className="py-8 text-center text-xs opacity-50 animate-pulse">Calculating your audio DNA...</div>
+                    <div className="py-8 text-center text-xs opacity-50 animate-pulse">
+                      Calculating your audio DNA...
+                    </div>
                   ) : (
                     <div className="space-y-3 max-h-60 overflow-y-auto no-scrollbar pr-1">
-                      {/* Top Artists */}
                       <div className="space-y-1.5">
-                        <p className="text-[10px] font-mono uppercase tracking-wider text-zinc-400 font-bold">
-                          👑 Top Artists
+                        <p className="text-[10px] font-mono uppercase tracking-wider opacity-60 font-bold">
+                          Top Artists
                         </p>
                         <div className="space-y-1">
                           {topArtists.map((art, idx) => (
-                            <div key={art.id} className="flex items-center gap-2 p-1.5 rounded-lg bg-white/5 text-xs">
-                              <span className="font-mono text-zinc-500 text-[10px] w-3">{idx + 1}</span>
-                              <img src={art.imageUrl} alt={art.name} className="w-6 h-6 rounded-full object-cover" />
-                              <span className="font-semibold text-zinc-200 truncate">{art.name}</span>
+                            <div
+                              key={art.id}
+                              className="flex items-center gap-2 p-1.5 rounded-lg bg-white/5 text-xs"
+                            >
+                              <span className="font-mono opacity-50 text-[10px] w-3">
+                                {idx + 1}
+                              </span>
+                              {art.imageUrl ? (
+                                <img
+                                  src={art.imageUrl}
+                                  alt={art.name}
+                                  className="w-6 h-6 rounded-full object-cover"
+                                />
+                              ) : (
+                                <div className="w-6 h-6 rounded-full bg-white/10 flex items-center justify-center">
+                                  <User className="w-3 h-3 opacity-60" />
+                                </div>
+                              )}
+                              <span className="font-semibold truncate">{art.name}</span>
                             </div>
                           ))}
                         </div>
                       </div>
 
-                      {/* Top Tracks */}
                       <div className="space-y-1.5 pt-1">
-                        <p className="text-[10px] font-mono uppercase tracking-wider text-zinc-400 font-bold">
-                          🔥 Top Tracks
+                        <p className="text-[10px] font-mono uppercase tracking-wider opacity-60 font-bold">
+                          Top Tracks
                         </p>
                         <div className="space-y-1">
                           {topTracks.map((tr, idx) => (
@@ -1518,24 +1773,38 @@ export default function HomePage() {
                               title="Click to play"
                             >
                               <div className="flex items-center gap-2 truncate flex-1 pr-2">
-                                <span className="font-mono text-zinc-500 text-[10px] w-3">{idx + 1}</span>
-                                <img src={tr.album?.images?.[0]?.url || ''} alt={tr.name} className="w-6 h-6 rounded object-cover" />
-                                <span className="font-semibold text-zinc-200 truncate group-hover:text-emerald-400 transition-colors">
+                                <span className="font-mono opacity-50 text-[10px] w-3">
+                                  {idx + 1}
+                                </span>
+                                {tr.album?.images?.[0]?.url ? (
+                                  <img
+                                    src={tr.album.images[0].url}
+                                    alt={tr.name}
+                                    className="w-6 h-6 rounded object-cover"
+                                  />
+                                ) : (
+                                  <div className="w-6 h-6 rounded bg-white/10 flex items-center justify-center">
+                                    <Music2 className="w-3 h-3 opacity-60" />
+                                  </div>
+                                )}
+                                <span
+                                  className={`font-semibold truncate transition-colors ${theme.hoverAccentText}`}
+                                >
                                   {tr.name}
                                 </span>
                               </div>
-                              <Play className="w-3 h-3 text-zinc-500 group-hover:text-emerald-400 fill-current opacity-0 group-hover:opacity-100 transition-opacity" />
+                              <Play className="w-3 h-3 text-emerald-400 fill-current opacity-0 group-hover:opacity-100 transition-opacity" />
                             </div>
                           ))}
                         </div>
                       </div>
 
-                      {/* Session Telemetry Badge */}
                       <div className="p-2.5 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-[11px] font-mono text-emerald-300 flex items-center justify-between">
                         <span className="flex items-center gap-1.5">
-                          <Clock className="w-3.5 h-3.5 text-emerald-400" /> Deck Time: {sessionMinutes}m
+                          <Clock className="w-3.5 h-3.5 text-emerald-400" /> Deck Time:{' '}
+                          {sessionMinutes}m
                         </span>
-                        <span>• {sessionTrackCount} Songs Streamed</span>
+                        <span>• {sessionTrackCount} Songs</span>
                       </div>
                     </div>
                   )}
@@ -1546,15 +1815,29 @@ export default function HomePage() {
         </div>
       </header>
 
-      {/* 11.C: THREE-COLUMN WORKSPACE */}
+      {/* DISMISSIBLE ERROR / STATUS BANNER */}
+      {statusBanner && (
+        <div className="relative z-20 px-4 py-2 bg-amber-500/15 border-b border-amber-500/30 text-amber-200 text-xs flex items-center justify-between gap-2 backdrop-blur-xl">
+          <div className="flex items-center gap-2">
+            <AlertCircle className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+            <span>{statusBanner}</span>
+          </div>
+          <button onClick={() => setStatusBanner(null)} className="p-0.5 hover:opacity-75">
+            <X className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      )}
+
+      {/* 10.C: THREE-COLUMN WORKSPACE */}
       <div className="relative z-10 flex-1 flex overflow-hidden">
-        
-        {/* LEFT COLUMN: PLAYLISTS DRAWER */}
+        {/* LEFT COLUMN: PLAYLISTS */}
         {layout === 'studio' && (
           <aside
-            className={`h-full w-64 border-r backdrop-blur-2xl flex flex-col shrink-0 overflow-hidden transition-all duration-300 z-10 ${theme.panel}`}
+            className={`h-full w-64 border-r backdrop-blur-2xl hidden lg:flex flex-col shrink-0 overflow-hidden transition-all duration-300 z-10 ${theme.panel}`}
           >
-            <div className={`p-3.5 border-b flex items-center justify-between min-h-[44px] ${theme.border}`}>
+            <div
+              className={`p-3.5 border-b flex items-center justify-between min-h-[44px] ${theme.border}`}
+            >
               {selectedPlaylist ? (
                 <button
                   onClick={() => setSelectedPlaylist(null)}
@@ -1564,7 +1847,9 @@ export default function HomePage() {
                   <span>All Playlists</span>
                 </button>
               ) : (
-                <h2 className="text-xs font-mono uppercase tracking-wider font-semibold opacity-70">Playlists</h2>
+                <h2 className="text-xs font-mono uppercase tracking-wider font-semibold opacity-70">
+                  Playlists
+                </h2>
               )}
             </div>
 
@@ -1572,13 +1857,21 @@ export default function HomePage() {
               {selectedPlaylist ? (
                 <div className="space-y-3">
                   <div className="text-center p-2">
-                    <img
-                      src={selectedPlaylist.images?.[0]?.url || ''}
-                      alt={selectedPlaylist.name}
-                      className="w-28 h-28 mx-auto rounded-2xl shadow-lg object-cover mb-2"
-                    />
+                    {selectedPlaylist.images?.[0]?.url ? (
+                      <img
+                        src={selectedPlaylist.images[0].url}
+                        alt={selectedPlaylist.name}
+                        className="w-28 h-28 mx-auto rounded-2xl shadow-lg object-cover mb-2"
+                      />
+                    ) : (
+                      <div className="w-28 h-28 mx-auto rounded-2xl bg-white/5 border border-white/10 flex items-center justify-center mb-2">
+                        <Music2 className="w-8 h-8 opacity-40" />
+                      </div>
+                    )}
                     <h3 className="font-bold text-xs truncate">{selectedPlaylist.name}</h3>
-                    <p className="text-[10px] opacity-60">{selectedPlaylist.tracks?.total ?? 0} songs</p>
+                    <p className="text-[10px] opacity-60">
+                      {selectedPlaylist.tracks?.total ?? 0} songs
+                    </p>
                     <button
                       onClick={() => handlePlayPlaylist(selectedPlaylist.uri)}
                       className={`mt-2 px-3 py-1 text-[11px] font-bold rounded-full transition-transform hover:scale-105 active:scale-95 shadow-md ${theme.accentBtn}`}
@@ -1589,7 +1882,9 @@ export default function HomePage() {
 
                   <div className={`space-y-0.5 border-t pt-2 ${theme.border}`}>
                     {isLoadingTracks ? (
-                      <div className="p-4 text-center text-xs opacity-50 animate-pulse">Loading songs...</div>
+                      <div className="p-4 text-center text-xs opacity-50 animate-pulse">
+                        Loading songs...
+                      </div>
                     ) : (
                       playlistTracks.map((track, idx) => (
                         <div
@@ -1597,7 +1892,9 @@ export default function HomePage() {
                           className="group flex items-center justify-between p-2 rounded-xl hover:bg-white/10 transition-colors text-xs"
                         >
                           <div className="truncate flex-1 pr-2">
-                            <p className={`font-medium truncate transition-colors group-hover:${theme.accentText}`}>
+                            <p
+                              className={`font-medium truncate transition-colors ${theme.hoverAccentText}`}
+                            >
                               {track.name}
                             </p>
                             <p className="text-[10px] opacity-60 truncate">
@@ -1605,10 +1902,16 @@ export default function HomePage() {
                             </p>
                           </div>
                           <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                            <button onClick={() => handlePlayTrack(track.uri)} className="p-1 hover:text-emerald-500">
+                            <button
+                              onClick={() => handlePlayTrack(track.uri)}
+                              className="p-1 hover:text-emerald-400"
+                            >
                               <Play className="w-3 h-3 fill-current" />
                             </button>
-                            <button onClick={() => handleAddToQueue(track)} className="p-1 hover:text-emerald-500">
+                            <button
+                              onClick={() => handleAddToQueue(track)}
+                              className="p-1 hover:text-emerald-400"
+                            >
                               <ListPlus className="w-3 h-3" />
                             </button>
                           </div>
@@ -1619,7 +1922,9 @@ export default function HomePage() {
                 </div>
               ) : !isAuthenticated ? (
                 <div className="p-4 text-center space-y-2 opacity-60">
-                  <p className="text-xs">Connect Spotify to view and stream your personal playlists.</p>
+                  <p className="text-xs">
+                    Connect Spotify to view and stream your personal playlists.
+                  </p>
                 </div>
               ) : (
                 playlists.map((pl) => (
@@ -1628,13 +1933,21 @@ export default function HomePage() {
                     onClick={() => openPlaylistInspector(pl)}
                     className="group rounded-xl cursor-pointer hover:bg-white/10 transition-all flex items-center gap-3 p-2"
                   >
-                    <img
-                      src={pl.images?.[0]?.url || ''}
-                      alt={pl.name}
-                      className="w-10 h-10 rounded-lg object-cover shadow-sm shrink-0"
-                    />
+                    {pl.images?.[0]?.url ? (
+                      <img
+                        src={pl.images[0].url}
+                        alt={pl.name}
+                        className="w-10 h-10 rounded-lg object-cover shadow-sm shrink-0"
+                      />
+                    ) : (
+                      <div className="w-10 h-10 rounded-lg bg-white/5 border border-white/10 flex items-center justify-center shrink-0">
+                        <Music2 className="w-4 h-4 opacity-50" />
+                      </div>
+                    )}
                     <div className="truncate flex-1">
-                      <p className={`text-xs font-semibold truncate transition-colors group-hover:${theme.accentText}`}>
+                      <p
+                        className={`text-xs font-semibold truncate transition-colors ${theme.hoverAccentText}`}
+                      >
                         {pl.name}
                       </p>
                       <p className="text-[10px] opacity-60">{pl.tracks?.total ?? 0} songs</p>
@@ -1648,15 +1961,12 @@ export default function HomePage() {
 
         {/* CENTER COLUMN: LIVING DECK + KARAOKE LYRICS + AI CHAT */}
         <main
-          className={`flex-1 flex flex-col justify-between overflow-hidden transition-all duration-500 z-10 ${
-            layout === 'cinema' ? 'px-8 py-6 max-w-4xl mx-auto' : 'px-6 py-4'
+          className={`flex-1 flex flex-col justify-between gap-3 overflow-hidden transition-all duration-500 z-10 ${
+            layout === 'cinema' ? 'px-6 py-4 max-w-4xl mx-auto' : 'px-4 md:px-6 py-3'
           }`}
         >
-          {/* Top Half: Frosted Deck Shield vs Synced Lyrics */}
           <div className="flex-1 flex flex-col items-center justify-center min-h-0 relative">
-            
-            {/* Lyrics View Switcher */}
-            <div className="absolute top-2 right-4 z-20 flex items-center gap-1 bg-black/40 border border-white/10 rounded-xl p-1 shadow-md">
+            <div className="absolute top-1 right-2 z-20 flex items-center gap-1 bg-black/40 border border-white/10 rounded-xl p-1 shadow-md">
               <button
                 onClick={() => setCenterMode('deck')}
                 className={`p-1.5 rounded-lg text-xs transition-colors ${
@@ -1671,23 +1981,21 @@ export default function HomePage() {
                 className={`p-1.5 rounded-lg text-xs transition-colors ${
                   centerMode === 'lyrics' ? theme.accentBtn : 'opacity-60 hover:opacity-100'
                 }`}
-                title="Apple Music Karaoke Synced Lyrics"
+                title="Synced Karaoke Lyrics"
               >
                 <Mic2 className="w-3.5 h-3.5" />
               </button>
             </div>
 
-            {/* A. LIVING DECK SHIELD */}
             {centerMode === 'deck' ? (
               <div
-                className={`w-full max-w-md p-6 rounded-3xl border shadow-2xl backdrop-blur-3xl flex flex-col items-center text-center transition-all duration-500 z-10 ${theme.panel}`}
+                className={`w-full max-w-md p-5 rounded-3xl border shadow-2xl backdrop-blur-3xl flex flex-col items-center text-center transition-all duration-500 z-10 ${theme.panel}`}
               >
-                {/* Album Art Showcase */}
                 <div
-                  className={`relative aspect-square rounded-2xl overflow-hidden border shadow-2xl mb-4 group flex items-center justify-center transition-all duration-500 ${
+                  className={`relative aspect-square rounded-2xl overflow-hidden border shadow-2xl mb-3.5 group flex items-center justify-center transition-all duration-500 ${
                     layout === 'cinema'
-                      ? 'w-60 md:w-72 shadow-[0_25px_60px_rgba(0,0,0,0.9)]'
-                      : 'w-52 md:w-56'
+                      ? 'w-48 md:w-64 shadow-[0_25px_60px_rgba(0,0,0,0.9)]'
+                      : 'w-40 sm:w-48 md:w-52'
                   } bg-black/40 border-white/10`}
                 >
                   {playback?.albumArt ? (
@@ -1698,39 +2006,40 @@ export default function HomePage() {
                     />
                   ) : (
                     <div className="flex flex-col items-center gap-2 opacity-60 p-4">
-                      <Music2 className="w-12 h-12 stroke-[1.2]" />
+                      <Music2 className="w-10 h-10 stroke-[1.2]" />
                       <p className="text-xs font-semibold">
                         {isAuthenticated ? 'Spotify is Idle' : 'Guest Standby Deck'}
                       </p>
                       {isAuthenticated && devices.length > 0 && (
                         <button
                           onClick={() => handleTransferDevice(devices[0].id)}
-                          className={`mt-2 px-3 py-1.5 text-[11px] font-bold rounded-full transition-all ${theme.accentBtn}`}
+                          className={`mt-1 px-3 py-1.5 text-[11px] font-bold rounded-full transition-all ${theme.accentBtn}`}
                         >
-                          📱 Wake Up {devices[0].name}
+                          Wake Up {devices[0].name}
                         </button>
                       )}
                     </div>
                   )}
                 </div>
 
-                {/* Track Title & Artist */}
                 <div className="space-y-0.5 px-2 mb-2 w-full">
                   <h2
                     className={`font-bold truncate tracking-tight transition-all ${
-                      layout === 'cinema' ? 'text-2xl' : 'text-lg'
+                      layout === 'cinema' ? 'text-xl md:text-2xl' : 'text-base md:text-lg'
                     }`}
                   >
                     {playback?.name || (isAuthenticated ? 'Awaiting Track...' : 'TrackDeck Player')}
                   </h2>
                   <p className="text-xs font-medium opacity-60 truncate">
-                    {playback?.artist || (isAuthenticated ? 'Play any song on phone' : 'Connect Spotify to stream')}
+                    {playback?.artist ||
+                      (isAuthenticated
+                        ? 'Play on Spotify or wake a device'
+                        : 'Connect Spotify to stream')}
                   </p>
                 </div>
 
-                {/* Sonic DNA Badge */}
-                {sonicDna && (
-                  <div className="flex items-center gap-2 text-[10px] font-mono opacity-70 bg-white/5 border border-white/10 px-2.5 py-1 rounded-full mb-3">
+                {settings.showSonicDna && sonicDna && (
+                  <div className="flex items-center gap-2 text-[10px] font-mono opacity-70 bg-white/5 border border-white/10 px-2.5 py-1 rounded-full mb-2.5">
                     <Activity className="w-3 h-3 text-emerald-400" />
                     <span>{sonicDna.bpm} BPM</span>
                     <span>•</span>
@@ -1740,8 +2049,7 @@ export default function HomePage() {
                   </div>
                 )}
 
-                {/* Clickable Scrub Bar */}
-                <div className="w-full space-y-1 mb-4">
+                <div className="w-full space-y-1 mb-3">
                   <div
                     onClick={handleSeek}
                     className={`w-full h-1.5 rounded-full overflow-hidden cursor-pointer transition-colors relative ${theme.scrubBg}`}
@@ -1758,7 +2066,6 @@ export default function HomePage() {
                   </div>
                 </div>
 
-                {/* Media Controls */}
                 <div className="flex items-center justify-center gap-8">
                   <button
                     onClick={handlePrev}
@@ -1769,12 +2076,12 @@ export default function HomePage() {
                   </button>
                   <button
                     onClick={togglePlay}
-                    className={`p-4 rounded-2xl shadow-xl transition-all hover:scale-105 active:scale-95 ${theme.accentBtn}`}
+                    className={`p-3.5 rounded-2xl shadow-xl transition-all hover:scale-105 active:scale-95 ${theme.accentBtn}`}
                   >
                     {playback?.isPlaying ? (
-                      <Pause className="w-6 h-6 fill-current" />
+                      <Pause className="w-5 h-5 fill-current" />
                     ) : (
-                      <Play className="w-6 h-6 fill-current ml-0.5" />
+                      <Play className="w-5 h-5 fill-current ml-0.5" />
                     )}
                   </button>
                   <button
@@ -1787,11 +2094,12 @@ export default function HomePage() {
                 </div>
               </div>
             ) : (
-              /* B. Synced Karaoke Lyrics */
-              <div className={`w-full max-w-xl h-full flex flex-col items-center justify-center p-6 rounded-3xl border shadow-2xl backdrop-blur-3xl overflow-hidden z-10 ${theme.panel}`}>
+              <div
+                className={`w-full max-w-xl h-full max-h-[420px] flex flex-col items-center justify-center p-5 rounded-3xl border shadow-2xl backdrop-blur-3xl overflow-hidden z-10 ${theme.panel}`}
+              >
                 <div
                   ref={lyricsContainerRef}
-                  className="w-full h-[300px] overflow-y-auto space-y-5 text-center no-scrollbar pr-2 py-16"
+                  className="w-full flex-1 overflow-y-auto space-y-5 text-center no-scrollbar pr-2 py-12"
                 >
                   {lyrics === null ? (
                     <div className="h-full flex flex-col items-center justify-center opacity-50 space-y-2">
@@ -1804,16 +2112,11 @@ export default function HomePage() {
                     lyrics.map((line, idx) => {
                       const isActive = idx === currentLyricIdx;
                       const isPast = idx < currentLyricIdx;
-
                       return (
                         <p
                           key={idx}
                           id={`lyric-line-${idx}`}
-                          onClick={() => {
-                            if (!playback) return;
-                            const devParam = activeDeviceId.current ? `?device_id=${activeDeviceId.current}` : '';
-                            callSpotify(`/me/player/seek?position_ms=${line.timeMs}${devParam}`, 'PUT');
-                          }}
+                          onClick={() => seekToMs(line.timeMs)}
                           className={`cursor-pointer transition-all duration-300 font-extrabold tracking-tight ${
                             isActive
                               ? `text-xl md:text-2xl scale-105 ${theme.accentText} drop-shadow-[0_0_20px_rgba(16,185,129,0.35)]`
@@ -1828,7 +2131,6 @@ export default function HomePage() {
                     })
                   )}
                 </div>
-
                 <button
                   onClick={() => setCenterMode('deck')}
                   className="mt-2 text-xs font-semibold opacity-60 hover:opacity-100 flex items-center gap-1.5 transition-opacity"
@@ -1839,56 +2141,78 @@ export default function HomePage() {
             )}
           </div>
 
-          {/* Bottom Half: Wide AI Chat Console */}
+          {/* AI COPILOT CONSOLE */}
           <div
-            className={`w-full mx-auto border rounded-2xl backdrop-blur-3xl flex flex-col justify-between p-3 shrink-0 shadow-lg h-[20vh] max-w-3xl transition-all duration-300 z-10 ${theme.panel}`}
+            className={`w-full mx-auto border rounded-2xl backdrop-blur-3xl flex flex-col justify-between p-3 shrink-0 shadow-lg h-36 md:h-40 max-w-3xl transition-all duration-300 z-10 ${theme.panel}`}
           >
-            <div className="flex-1 overflow-y-auto space-y-1.5 pr-2 text-xs">
-              {messages.map((m, i) => (
-                <div key={i} className={`flex flex-col ${m.role === 'user' ? 'items-end' : 'items-start'}`}>
-                  <div
-                    className={`px-3 py-1.5 rounded-xl max-w-[90%] leading-relaxed ${
-                      m.role === 'user' ? theme.accentBtn : 'bg-white/10 opacity-90'
-                    }`}
-                  >
-                    {m.text}
-                  </div>
+            {!copilotEnabled ? (
+              <div className="h-full flex flex-col items-center justify-center text-center gap-2">
+                <Sparkles className="w-5 h-5 opacity-40" />
+                <p className="text-xs opacity-60">Copilot is disconnected.</p>
+                <button
+                  onClick={() => toggleCopilot(true)}
+                  className={`px-3.5 py-1.5 rounded-xl text-xs font-bold ${theme.accentBtn}`}
+                >
+                  Reconnect Copilot
+                </button>
+              </div>
+            ) : (
+              <>
+                <div className="flex-1 overflow-y-auto space-y-1.5 pr-2 text-xs">
+                  {messages.map((m, i) => (
+                    <div
+                      key={i}
+                      className={`flex flex-col ${m.role === 'user' ? 'items-end' : 'items-start'}`}
+                    >
+                      <div
+                        className={`px-3 py-1.5 rounded-xl max-w-[90%] leading-relaxed ${
+                          m.role === 'user' ? theme.accentBtn : 'bg-white/10 opacity-90'
+                        }`}
+                      >
+                        {m.text}
+                      </div>
+                    </div>
+                  ))}
+                  {isAiLoading && (
+                    <div className="flex items-center gap-1.5 text-[11px] font-mono animate-pulse opacity-70">
+                      <Sparkles className="w-3 h-3 text-emerald-500" /> Thinking...
+                    </div>
+                  )}
+                  <div ref={chatBottomRef} />
                 </div>
-              ))}
-              {isAiLoading && (
-                <div className="flex items-center gap-1.5 text-[11px] font-mono animate-pulse opacity-70">
-                  <Sparkles className="w-3 h-3 text-emerald-500" /> Thinking...
-                </div>
-              )}
-              <div ref={chatBottomRef} />
-            </div>
 
-            <form onSubmit={handleFormSubmit} className="flex gap-2 pt-2">
-              <input
-                type="text"
-                value={chatInput}
-                onChange={(e) => setChatInput(e.target.value)}
-                placeholder="Ask music trivia, say 'play Silly Watch by Lil Uzi Vert', or 'unpause'..."
-                className={`flex-1 border rounded-xl px-3.5 py-2 text-xs focus:outline-none transition-colors ${theme.input}`}
-              />
-              <button
-                type="submit"
-                disabled={isAiLoading || !chatInput.trim()}
-                className={`p-2 rounded-xl transition-all disabled:opacity-40 ${theme.accentBtn}`}
-              >
-                <Send className="w-3.5 h-3.5" />
-              </button>
-            </form>
+                <form onSubmit={handleFormSubmit} className="flex gap-2 pt-2">
+                  <input
+                    type="text"
+                    value={chatInput}
+                    onChange={(e) => setChatInput(e.target.value)}
+                    placeholder="Ask music trivia, say 'play Silly Watch by Lil Uzi Vert', or 'unpause'..."
+                    className={`flex-1 border rounded-xl px-3.5 py-2 text-xs focus:outline-none transition-colors ${theme.input}`}
+                  />
+                  <button
+                    type="submit"
+                    disabled={isAiLoading || !chatInput.trim()}
+                    className={`p-2 rounded-xl transition-all disabled:opacity-40 ${theme.accentBtn}`}
+                  >
+                    <Send className="w-3.5 h-3.5" />
+                  </button>
+                </form>
+              </>
+            )}
           </div>
         </main>
 
         {/* RIGHT COLUMN: LIVE QUEUE */}
         {layout === 'studio' && (
           <aside
-            className={`h-full w-64 border-l backdrop-blur-2xl flex flex-col shrink-0 overflow-hidden transition-all duration-300 z-10 ${theme.panel}`}
+            className={`h-full w-64 border-l backdrop-blur-2xl hidden lg:flex flex-col shrink-0 overflow-hidden transition-all duration-300 z-10 ${theme.panel}`}
           >
-            <div className={`p-3.5 border-b flex items-center justify-between min-h-[44px] ${theme.border}`}>
-              <h2 className="text-xs font-mono uppercase tracking-wider font-semibold opacity-70">Queue</h2>
+            <div
+              className={`p-3.5 border-b flex items-center justify-between min-h-[44px] ${theme.border}`}
+            >
+              <h2 className="text-xs font-mono uppercase tracking-wider font-semibold opacity-70">
+                Queue
+              </h2>
             </div>
 
             <div className="flex-1 overflow-y-auto p-2 space-y-1.5 no-scrollbar">
@@ -1904,13 +2228,21 @@ export default function HomePage() {
                     className="group rounded-xl cursor-pointer hover:bg-white/10 transition-all flex items-center gap-3 p-2"
                     title={`${track.name} - ${track.artists?.map((a) => a.name).join(', ')}`}
                   >
-                    <img
-                      src={track.album?.images?.[0]?.url || ''}
-                      alt={track.name}
-                      className="w-10 h-10 rounded-lg object-cover shadow-sm shrink-0"
-                    />
+                    {track.album?.images?.[0]?.url ? (
+                      <img
+                        src={track.album.images[0].url}
+                        alt={track.name}
+                        className="w-10 h-10 rounded-lg object-cover shadow-sm shrink-0"
+                      />
+                    ) : (
+                      <div className="w-10 h-10 rounded-lg bg-white/5 border border-white/10 flex items-center justify-center shrink-0">
+                        <Music2 className="w-4 h-4 opacity-50" />
+                      </div>
+                    )}
                     <div className="truncate flex-1">
-                      <p className={`text-xs font-semibold truncate transition-colors group-hover:${theme.accentText}`}>
+                      <p
+                        className={`text-xs font-semibold truncate transition-colors ${theme.hoverAccentText}`}
+                      >
                         {track.name}
                       </p>
                       <p className="text-[10px] opacity-60 truncate">
@@ -1926,27 +2258,33 @@ export default function HomePage() {
       </div>
 
       {/* ==================================================================== */}
-      {/* SECTION 12: MODALS                                                   */}
+      {/* SECTION 11: MODALS                                                   */}
       {/* ==================================================================== */}
 
-      {/* 12.A: ATMOSPHERE STUDIO MODAL */}
+      {/* 11.A: ATMOSPHERE STUDIO MODAL */}
       {showAtmosphereModal && (
         <div className="fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex items-center justify-center p-4">
-          <div className={`w-full max-w-xl rounded-3xl p-6 shadow-2xl space-y-5 border max-h-[90vh] flex flex-col ${theme.modal}`}>
+          <div
+            className={`w-full max-w-xl rounded-3xl p-6 shadow-2xl space-y-5 border max-h-[90vh] flex flex-col ${theme.modal}`}
+          >
             <div className="flex items-center justify-between border-b pb-3 border-inherit shrink-0">
               <div className="flex items-center gap-2">
                 <Palette className="w-5 h-5 text-emerald-500" />
                 <div>
                   <h3 className="font-bold text-sm">Atmosphere & Deck Customizer</h3>
-                  <p className="text-[10px] opacity-60">Pick a ready-to-use vibe or customize your own deck</p>
+                  <p className="text-[10px] opacity-60">
+                    Pick a ready-to-use vibe or customize your own deck
+                  </p>
                 </div>
               </div>
-              <button onClick={() => setShowAtmosphereModal(false)} className="opacity-50 hover:opacity-100 p-1">
+              <button
+                onClick={() => setShowAtmosphereModal(false)}
+                className="opacity-50 hover:opacity-100 p-1"
+              >
                 <X className="w-4 h-4" />
               </button>
             </div>
 
-            {/* Accent Palette Bar */}
             <div className="space-y-1.5 border-b pb-3 border-inherit shrink-0">
               <div className="flex items-center justify-between text-[11px] font-mono uppercase tracking-wider opacity-60">
                 <span>Deck Button & Accent Colors</span>
@@ -1958,7 +2296,9 @@ export default function HomePage() {
                     key={c}
                     onClick={() => changeColorTheme(c)}
                     className={`py-1.5 px-2 rounded-xl border text-[10px] font-bold capitalize flex items-center justify-center gap-1 transition-all ${
-                      colorTheme === c ? 'border-emerald-500 bg-emerald-500/20' : 'border-white/10 hover:border-white/30'
+                      colorTheme === c
+                        ? 'border-emerald-500 bg-emerald-500/20'
+                        : 'border-white/10 hover:border-white/30'
                     }`}
                   >
                     <span
@@ -1982,7 +2322,6 @@ export default function HomePage() {
               </div>
             </div>
 
-            {/* Mode Switcher */}
             <div className="grid grid-cols-2 gap-2 bg-black/25 p-1 rounded-2xl border border-inherit shrink-0">
               <button
                 onClick={() => setAtmoMode('presets')}
@@ -2005,22 +2344,20 @@ export default function HomePage() {
             <div className="flex-1 overflow-y-auto pr-1 space-y-4">
               {atmoMode === 'presets' ? (
                 <div className="space-y-4">
-                  {/* Chameleon Reality */}
-                  <div className="bg-gradient-to-r from-emerald-500/20 via-teal-500/10 to-transparent border border-emerald-500/30 p-4 rounded-2xl flex items-center justify-between">
+                  <div className="bg-gradient-to-r from-emerald-500/20 via-teal-500/10 to-transparent border border-emerald-500/30 p-4 rounded-2xl flex items-center justify-between gap-3">
                     <div>
                       <p className="font-bold text-xs flex items-center gap-1.5 text-emerald-400">
-                        <Compass className="w-4 h-4" /> Chameleon Reality (Live Weather & Clock Sync)
+                        <Compass className="w-4 h-4" /> Chameleon Reality (Live Weather Sync)
                       </p>
                       <p className="text-[11px] opacity-70 mt-1 max-w-sm">
-                        Automatically detects local weather & mirrors day/night lighting.
+                        Detects local weather & mirrors day/night lighting.
                       </p>
                       {localWeather && (
-                        <p className="text-[10px] font-mono text-zinc-400 mt-1">
+                        <p className="text-[10px] font-mono opacity-60 mt-1">
                           Detected: {localWeather.description}
                         </p>
                       )}
                     </div>
-
                     <button
                       onClick={applyChameleonReality}
                       disabled={isDetectingWeather}
@@ -2030,8 +2367,7 @@ export default function HomePage() {
                     </button>
                   </div>
 
-                  {/* Preset Cards */}
-                  <div className="grid grid-cols-2 gap-2.5">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                     {VIBE_PRESETS.map((preset) => (
                       <button
                         key={preset.id}
@@ -2042,7 +2378,11 @@ export default function HomePage() {
                             : 'border-white/10 hover:border-white/25 hover:bg-white/5'
                         }`}
                       >
-                        <img src={preset.url} alt={preset.name} className="w-16 h-16 rounded-xl object-cover shrink-0 shadow-md group-hover:scale-105 transition-transform" />
+                        <img
+                          src={preset.url}
+                          alt={preset.name}
+                          className="w-16 h-16 rounded-xl object-cover shrink-0 shadow-md group-hover:scale-105 transition-transform"
+                        />
                         <div className="truncate flex-1">
                           <p className="font-bold text-xs truncate flex items-center justify-between">
                             {preset.name}
@@ -2050,40 +2390,57 @@ export default function HomePage() {
                               <Check className="w-3.5 h-3.5 text-emerald-500 shrink-0" />
                             )}
                           </p>
-                          <p className="text-[10px] opacity-60 leading-tight line-clamp-2 mt-0.5">{preset.desc}</p>
+                          <p className="text-[10px] opacity-60 leading-tight line-clamp-2 mt-0.5">
+                            {preset.desc}
+                          </p>
                         </div>
                       </button>
                     ))}
                   </div>
 
-                  {/* Ambient Audio Selector */}
                   <div className="space-y-2 border-t pt-4 border-inherit">
                     <label className="text-[11px] font-mono uppercase tracking-wider opacity-70 flex items-center gap-1.5 font-bold">
-                      <Volume2 className="w-3.5 h-3.5 text-emerald-500" /> Layered Ambient Soundscape (Plays under Spotify)
+                      <Volume2 className="w-3.5 h-3.5 text-emerald-500" /> Layered Ambient
+                      Soundscape
                     </label>
-
                     <div className="grid grid-cols-4 gap-2">
                       <button
                         onClick={() => setAmbientSound('off')}
-                        className={`p-2 rounded-xl border text-xs font-semibold ${ambientSound === 'off' ? 'border-emerald-500 bg-emerald-500/10' : 'border-white/10'}`}
+                        className={`p-2 rounded-xl border text-xs font-semibold ${
+                          ambientSound === 'off'
+                            ? 'border-emerald-500 bg-emerald-500/10'
+                            : 'border-white/10'
+                        }`}
                       >
                         Muted
                       </button>
                       <button
                         onClick={() => setAmbientSound('rain')}
-                        className={`p-2 rounded-xl border text-xs font-semibold flex items-center justify-center gap-1 ${ambientSound === 'rain' ? 'border-cyan-400 bg-cyan-400/10 text-cyan-300' : 'border-white/10'}`}
+                        className={`p-2 rounded-xl border text-xs font-semibold flex items-center justify-center gap-1 ${
+                          ambientSound === 'rain'
+                            ? 'border-cyan-400 bg-cyan-400/10 text-cyan-300'
+                            : 'border-white/10'
+                        }`}
                       >
                         <CloudRain className="w-3.5 h-3.5" /> Rain
                       </button>
                       <button
                         onClick={() => setAmbientSound('hearth')}
-                        className={`p-2 rounded-xl border text-xs font-semibold flex items-center justify-center gap-1 ${ambientSound === 'hearth' ? 'border-amber-400 bg-amber-400/10 text-amber-300' : 'border-white/10'}`}
+                        className={`p-2 rounded-xl border text-xs font-semibold flex items-center justify-center gap-1 ${
+                          ambientSound === 'hearth'
+                            ? 'border-amber-400 bg-amber-400/10 text-amber-300'
+                            : 'border-white/10'
+                        }`}
                       >
                         <Flame className="w-3.5 h-3.5" /> Fireplace
                       </button>
                       <button
                         onClick={() => setAmbientSound('wind')}
-                        className={`p-2 rounded-xl border text-xs font-semibold flex items-center justify-center gap-1 ${ambientSound === 'wind' ? 'border-sky-300 bg-sky-300/10 text-sky-200' : 'border-white/10'}`}
+                        className={`p-2 rounded-xl border text-xs font-semibold flex items-center justify-center gap-1 ${
+                          ambientSound === 'wind'
+                            ? 'border-sky-300 bg-sky-300/10 text-sky-200'
+                            : 'border-white/10'
+                        }`}
                       >
                         <Snowflake className="w-3.5 h-3.5" /> Wind
                       </button>
@@ -2108,47 +2465,32 @@ export default function HomePage() {
                   </div>
                 </div>
               ) : (
-                /* Custom Builder */
                 <div className="space-y-5">
                   <div className="space-y-2.5">
                     <label className="text-[11px] font-mono uppercase tracking-wider opacity-70 flex items-center gap-1.5 font-bold">
-                      <ImageIcon className="w-3.5 h-3.5 text-emerald-500" /> 1. Select Wallpaper Source
+                      <ImageIcon className="w-3.5 h-3.5 text-emerald-500" /> 1. Wallpaper Source
                     </label>
-
                     <div className="grid grid-cols-3 gap-2">
-                      <button
-                        onClick={() => {
-                          setBgMode('gallery');
-                          updateParam('trackdeck_bg_mode', 'gallery');
-                        }}
-                        className={`p-2.5 rounded-xl border text-xs font-semibold transition-all ${
-                          bgMode === 'gallery' ? 'border-emerald-500 bg-emerald-500/10' : 'border-white/10'
-                        }`}
-                      >
-                        Aesthetic Gallery
-                      </button>
-                      <button
-                        onClick={() => {
-                          setBgMode('custom');
-                          updateParam('trackdeck_bg_mode', 'custom');
-                        }}
-                        className={`p-2.5 rounded-xl border text-xs font-semibold transition-all ${
-                          bgMode === 'custom' ? 'border-emerald-500 bg-emerald-500/10' : 'border-white/10'
-                        }`}
-                      >
-                        Upload Photo
-                      </button>
-                      <button
-                        onClick={() => {
-                          setBgMode('album');
-                          updateParam('trackdeck_bg_mode', 'album');
-                        }}
-                        className={`p-2.5 rounded-xl border text-xs font-semibold transition-all ${
-                          bgMode === 'album' ? 'border-emerald-500 bg-emerald-500/10' : 'border-white/10'
-                        }`}
-                      >
-                        Album Glow
-                      </button>
+                      {(['gallery', 'custom', 'album'] as BgMode[]).map((mode) => (
+                        <button
+                          key={mode}
+                          onClick={() => {
+                            setBgMode(mode);
+                            updateParam('trackdeck_bg_mode', mode);
+                          }}
+                          className={`p-2.5 rounded-xl border text-xs font-semibold transition-all ${
+                            bgMode === mode
+                              ? 'border-emerald-500 bg-emerald-500/10'
+                              : 'border-white/10'
+                          }`}
+                        >
+                          {mode === 'gallery'
+                            ? 'Aesthetic Gallery'
+                            : mode === 'custom'
+                            ? 'Upload Photo'
+                            : 'Album Glow'}
+                        </button>
+                      ))}
                     </div>
 
                     {bgMode === 'gallery' && (
@@ -2161,12 +2503,20 @@ export default function HomePage() {
                               updateParam('trackdeck_bg_gallery', img.url);
                             }}
                             className={`relative aspect-video rounded-xl overflow-hidden border transition-all group ${
-                              selectedGalleryUrl === img.url ? 'border-emerald-500 ring-2 ring-emerald-500/40' : 'border-white/10'
+                              selectedGalleryUrl === img.url
+                                ? 'border-emerald-500 ring-2 ring-emerald-500/40'
+                                : 'border-white/10'
                             }`}
                           >
-                            <img src={img.url} alt={img.name} className="w-full h-full object-cover group-hover:scale-105 transition-transform" />
+                            <img
+                              src={img.url}
+                              alt={img.name}
+                              className="w-full h-full object-cover group-hover:scale-105 transition-transform"
+                            />
                             <div className="absolute inset-0 bg-black/40 flex items-end p-1">
-                              <span className="text-[9px] font-bold text-white truncate">{img.name}</span>
+                              <span className="text-[9px] font-bold text-white truncate">
+                                {img.name}
+                              </span>
                             </div>
                           </button>
                         ))}
@@ -2177,140 +2527,156 @@ export default function HomePage() {
                       <div className="pt-1 space-y-2">
                         <label className="border-2 border-dashed border-white/20 hover:border-emerald-500 rounded-2xl p-4 flex flex-col items-center justify-center cursor-pointer transition-colors bg-white/[0.02]">
                           <Upload className="w-6 h-6 text-emerald-500 mb-1" />
-                          <span className="text-xs font-semibold">Upload Photo from Chromebook</span>
-                          <span className="text-[10px] opacity-50">Auto-compressed into browser memory</span>
-                          <input type="file" accept="image/*" onChange={handleImageUpload} className="hidden" />
+                          <span className="text-xs font-semibold">Upload Photo</span>
+                          <span className="text-[10px] opacity-50">
+                            Auto-compressed into browser storage
+                          </span>
+                          <input
+                            type="file"
+                            accept="image/*"
+                            onChange={handleImageUpload}
+                            className="hidden"
+                          />
                         </label>
-                        {bgCustomUrl && <p className="text-[10px] text-emerald-400 font-mono text-center">✓ Custom photo loaded</p>}
+                        {bgCustomUrl && (
+                          <p className="text-[10px] text-emerald-400 font-mono text-center">
+                            Custom photo loaded
+                          </p>
+                        )}
                       </div>
                     )}
                   </div>
 
                   <div className="space-y-3 border-t pt-4 border-inherit">
                     <label className="text-[11px] font-mono uppercase tracking-wider opacity-70 flex items-center gap-1.5 font-bold">
-                      <Sliders className="w-3.5 h-3.5 text-emerald-500" /> 2. Wallpaper Camera & Focus Sliders
+                      <Sliders className="w-3.5 h-3.5 text-emerald-500" /> 2. Camera & Focus
                     </label>
-
-                    <div className="space-y-1">
-                      <div className="flex justify-between text-xs">
-                        <span>Blur Intensity</span>
-                        <span className="font-mono opacity-60">{bgBlur}px</span>
+                    {[
+                      {
+                        label: 'Blur Intensity',
+                        val: bgBlur,
+                        suffix: 'px',
+                        min: 0,
+                        max: 40,
+                        key: 'trackdeck_bg_blur',
+                        setter: setBgBlur,
+                      },
+                      {
+                        label: 'Dark Tint (Contrast)',
+                        val: bgDim,
+                        suffix: '%',
+                        min: 10,
+                        max: 90,
+                        key: 'trackdeck_bg_dim',
+                        setter: setBgDim,
+                      },
+                      {
+                        label: 'Vertical Crop Position',
+                        val: bgPosY,
+                        suffix: '%',
+                        min: 0,
+                        max: 100,
+                        key: 'trackdeck_bg_pos_y',
+                        setter: setBgPosY,
+                      },
+                      {
+                        label: 'Zoom / Scale',
+                        val: bgScale,
+                        suffix: '%',
+                        min: 100,
+                        max: 150,
+                        key: 'trackdeck_bg_scale',
+                        setter: setBgScale,
+                      },
+                    ].map((s) => (
+                      <div key={s.key} className="space-y-1">
+                        <div className="flex justify-between text-xs">
+                          <span>{s.label}</span>
+                          <span className="font-mono opacity-60">
+                            {s.val}
+                            {s.suffix}
+                          </span>
+                        </div>
+                        <input
+                          type="range"
+                          min={s.min}
+                          max={s.max}
+                          value={s.val}
+                          onChange={(e) => {
+                            const val = Number(e.target.value);
+                            s.setter(val);
+                            updateParam(s.key, val);
+                          }}
+                          className="w-full h-1.5 bg-white/10 rounded-lg appearance-none cursor-pointer accent-emerald-500"
+                        />
                       </div>
-                      <input
-                        type="range"
-                        min="0"
-                        max="40"
-                        value={bgBlur}
-                        onChange={(e) => {
-                          const val = Number(e.target.value);
-                          setBgBlur(val);
-                          updateParam('trackdeck_bg_blur', val);
-                        }}
-                        className="w-full h-1.5 bg-white/10 rounded-lg appearance-none cursor-pointer accent-emerald-500"
-                      />
-                    </div>
-
-                    <div className="space-y-1">
-                      <div className="flex justify-between text-xs">
-                        <span>Dark Tint (Contrast with HUD)</span>
-                        <span className="font-mono opacity-60">{bgDim}%</span>
-                      </div>
-                      <input
-                        type="range"
-                        min="10"
-                        max="90"
-                        value={bgDim}
-                        onChange={(e) => {
-                          const val = Number(e.target.value);
-                          setBgDim(val);
-                          updateParam('trackdeck_bg_dim', val);
-                        }}
-                        className="w-full h-1.5 bg-white/10 rounded-lg appearance-none cursor-pointer accent-emerald-500"
-                      />
-                    </div>
-
-                    <div className="space-y-1">
-                      <div className="flex justify-between text-xs">
-                        <span>Vertical Crop Position</span>
-                        <span className="font-mono opacity-60">
-                          {bgPosY < 35 ? 'Top' : bgPosY > 65 ? 'Bottom' : 'Center'} ({bgPosY}%)
-                        </span>
-                      </div>
-                      <input
-                        type="range"
-                        min="0"
-                        max="100"
-                        value={bgPosY}
-                        onChange={(e) => {
-                          const val = Number(e.target.value);
-                          setBgPosY(val);
-                          updateParam('trackdeck_bg_pos_y', val);
-                        }}
-                        className="w-full h-1.5 bg-white/10 rounded-lg appearance-none cursor-pointer accent-emerald-500"
-                      />
-                    </div>
-
-                    <div className="space-y-1">
-                      <div className="flex justify-between text-xs">
-                        <span>Zoom / Scale</span>
-                        <span className="font-mono opacity-60">{bgScale}%</span>
-                      </div>
-                      <input
-                        type="range"
-                        min="100"
-                        max="150"
-                        value={bgScale}
-                        onChange={(e) => {
-                          const val = Number(e.target.value);
-                          setBgScale(val);
-                          updateParam('trackdeck_bg_scale', val);
-                        }}
-                        className="w-full h-1.5 bg-white/10 rounded-lg appearance-none cursor-pointer accent-emerald-500"
-                      />
-                    </div>
+                    ))}
                   </div>
 
                   <div className="space-y-3 border-t pt-4 border-inherit">
                     <label className="text-[11px] font-mono uppercase tracking-wider opacity-70 flex items-center gap-1.5 font-bold">
-                      <CloudRain className="w-3.5 h-3.5 text-cyan-400" /> 3. Live Real-Time Weather Shaders
+                      <CloudRain className="w-3.5 h-3.5 text-cyan-400" /> 3. Live Weather Shaders
                     </label>
-
                     <div className="grid grid-cols-3 gap-2">
                       <button
                         onClick={() => changeWeatherFx('none')}
-                        className={`p-2 rounded-xl border text-xs font-semibold ${weatherFx === 'none' ? 'border-emerald-500 bg-emerald-500/10' : 'border-white/10'}`}
+                        className={`p-2 rounded-xl border text-xs font-semibold ${
+                          weatherFx === 'none'
+                            ? 'border-emerald-500 bg-emerald-500/10'
+                            : 'border-white/10'
+                        }`}
                       >
                         None (Clear)
                       </button>
                       <button
                         onClick={() => changeWeatherFx('rain')}
-                        className={`p-2 rounded-xl border text-xs font-semibold flex items-center justify-center gap-1 ${weatherFx === 'rain' ? 'border-cyan-400 bg-cyan-400/10 text-cyan-300' : 'border-white/10'}`}
+                        className={`p-2 rounded-xl border text-xs font-semibold flex items-center justify-center gap-1 ${
+                          weatherFx === 'rain'
+                            ? 'border-cyan-400 bg-cyan-400/10 text-cyan-300'
+                            : 'border-white/10'
+                        }`}
                       >
                         <CloudRain className="w-3.5 h-3.5" /> Rain
                       </button>
                       <button
                         onClick={() => changeWeatherFx('thunderstorm')}
-                        className={`p-2 rounded-xl border text-xs font-semibold flex items-center justify-center gap-1 ${weatherFx === 'thunderstorm' ? 'border-amber-400 bg-amber-400/10 text-amber-300' : 'border-white/10'}`}
+                        className={`p-2 rounded-xl border text-xs font-semibold flex items-center justify-center gap-1 ${
+                          weatherFx === 'thunderstorm'
+                            ? 'border-amber-400 bg-amber-400/10 text-amber-300'
+                            : 'border-white/10'
+                        }`}
                       >
-                        <Zap className="w-3.5 h-3.5" /> Storm + Flash
+                        <Zap className="w-3.5 h-3.5" /> Storm
                       </button>
                       <button
                         onClick={() => changeWeatherFx('embers')}
-                        className={`p-2 rounded-xl border text-xs font-semibold flex items-center justify-center gap-1 ${weatherFx === 'embers' ? 'border-orange-500 bg-orange-500/10 text-orange-300' : 'border-white/10'}`}
+                        className={`p-2 rounded-xl border text-xs font-semibold flex items-center justify-center gap-1 ${
+                          weatherFx === 'embers'
+                            ? 'border-orange-500 bg-orange-500/10 text-orange-300'
+                            : 'border-white/10'
+                        }`}
                       >
                         <Flame className="w-3.5 h-3.5" /> Embers
                       </button>
                       <button
                         onClick={() => changeWeatherFx('snow')}
-                        className={`p-2 rounded-xl border text-xs font-semibold flex items-center justify-center gap-1 ${weatherFx === 'snow' ? 'border-sky-300 bg-sky-300/10 text-sky-200' : 'border-white/10'}`}
+                        className={`p-2 rounded-xl border text-xs font-semibold flex items-center justify-center gap-1 ${
+                          weatherFx === 'snow'
+                            ? 'border-sky-300 bg-sky-300/10 text-sky-200'
+                            : 'border-white/10'
+                        }`}
                       >
-                        <Snowflake className="w-3.5 h-3.5" /> Realistic Snow
+                        <Snowflake className="w-3.5 h-3.5" /> Snow
                       </button>
                       <button
                         onClick={() => changeWeatherFx('scanlines')}
-                        className={`p-2 rounded-xl border text-xs font-semibold flex items-center justify-center gap-1 ${weatherFx === 'scanlines' ? 'border-emerald-400 bg-emerald-400/10 text-emerald-300' : 'border-white/10'}`}
+                        className={`p-2 rounded-xl border text-xs font-semibold flex items-center justify-center gap-1 ${
+                          weatherFx === 'scanlines'
+                            ? 'border-emerald-400 bg-emerald-400/10 text-emerald-300'
+                            : 'border-white/10'
+                        }`}
                       >
-                        <Tv className="w-3.5 h-3.5" /> CRT Scanlines
+                        <Tv className="w-3.5 h-3.5" /> CRT
                       </button>
                     </div>
 
@@ -2334,7 +2700,6 @@ export default function HomePage() {
                             className="w-full h-1.5 bg-white/10 rounded-lg appearance-none cursor-pointer accent-emerald-500"
                           />
                         </div>
-
                         <div className="space-y-1">
                           <div className="flex justify-between text-xs">
                             <span>Drift & Fall Speed</span>
@@ -2361,12 +2726,13 @@ export default function HomePage() {
                     <label className="text-[11px] font-mono uppercase tracking-wider opacity-70 flex items-center gap-1.5 font-bold">
                       <LayoutGrid className="w-3.5 h-3.5 text-emerald-500" /> 4. Layout Mode
                     </label>
-
                     <div className="grid grid-cols-2 gap-2">
                       <button
                         onClick={() => changeLayout('studio')}
                         className={`p-2.5 rounded-xl border text-xs font-semibold flex items-center justify-center gap-1.5 ${
-                          layout === 'studio' ? 'border-emerald-500 bg-emerald-500/10' : 'border-white/10'
+                          layout === 'studio'
+                            ? 'border-emerald-500 bg-emerald-500/10'
+                            : 'border-white/10'
                         }`}
                       >
                         <LayoutGrid className="w-3.5 h-3.5" /> Studio (3-Column)
@@ -2374,7 +2740,9 @@ export default function HomePage() {
                       <button
                         onClick={() => changeLayout('cinema')}
                         className={`p-2.5 rounded-xl border text-xs font-semibold flex items-center justify-center gap-1.5 ${
-                          layout === 'cinema' ? 'border-emerald-500 bg-emerald-500/10' : 'border-white/10'
+                          layout === 'cinema'
+                            ? 'border-emerald-500 bg-emerald-500/10'
+                            : 'border-white/10'
                         }`}
                       >
                         <Maximize2 className="w-3.5 h-3.5" /> Cinema Focus
@@ -2397,36 +2765,44 @@ export default function HomePage() {
         </div>
       )}
 
-      {/* 12.B: SPOTIFY CONNECT DEVICES MODAL */}
+      {/* 11.B: SPOTIFY CONNECT DEVICES MODAL */}
       {showDevicesModal && (
         <div className="fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex items-center justify-center p-4">
-          <div className={`w-full max-w-md rounded-3xl p-6 shadow-2xl space-y-5 border ${theme.modal}`}>
+          <div className={`w-full max-w-md rounded-3xl p-6 shadow-2xl space-y-4 border ${theme.modal}`}>
             <div className="flex items-center justify-between border-b pb-3 border-inherit">
               <div className="flex items-center gap-2">
                 <Radio className="w-4 h-4 text-emerald-500" />
                 <h3 className="font-bold text-sm">Spotify Connect Devices</h3>
               </div>
-              <button onClick={() => setShowDevicesModal(false)} className="opacity-50 hover:opacity-100 p-1">
+              <button
+                onClick={() => setShowDevicesModal(false)}
+                className="opacity-50 hover:opacity-100 p-1"
+              >
                 <X className="w-4 h-4" />
               </button>
             </div>
 
             <p className="text-xs opacity-60 leading-relaxed">
-              Select which device receives the audio stream. Tap any device below to wake it up and resume playback remotely.
+              Select which device plays audio. If your phone app was swiped closed, open Spotify
+              once on the phone so it appears below, then tap <strong>Play Here</strong>.
             </p>
 
             <div className="space-y-2 max-h-60 overflow-y-auto">
               {devices.length === 0 ? (
-                <div className="p-4 text-center text-xs opacity-50 space-y-2">
-                  <p>No active Spotify devices found.</p>
-                  <p className="text-[11px] opacity-40">Open Spotify on your phone or PC to wake it up.</p>
+                <div className="p-4 text-center text-xs opacity-60 space-y-1.5">
+                  <p className="font-semibold">No active Spotify devices found.</p>
+                  <p className="text-[11px] opacity-60">
+                    Open Spotify on your phone or PC to register it, then click Refresh.
+                  </p>
                 </div>
               ) : (
                 devices.map((d) => (
                   <div
                     key={d.id}
                     className={`flex items-center justify-between p-3 rounded-2xl border transition-all ${
-                      d.is_active ? 'bg-emerald-500/10 border-emerald-500/30' : 'border-white/10 hover:bg-white/5'
+                      d.is_active
+                        ? 'bg-emerald-500/10 border-emerald-500/30'
+                        : 'border-white/10 hover:bg-white/5'
                     }`}
                   >
                     <div className="flex items-center gap-3">
@@ -2440,7 +2816,9 @@ export default function HomePage() {
                       <div>
                         <p className="font-semibold text-xs flex items-center gap-2">
                           {d.name}
-                          {d.is_active && <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />}
+                          {d.is_active && (
+                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                          )}
                         </p>
                         <p className="text-[10px] opacity-60 capitalize">{d.type}</p>
                       </div>
@@ -2466,7 +2844,10 @@ export default function HomePage() {
               >
                 <RefreshCw className="w-3 h-3" /> Refresh Device List
               </button>
-              <button onClick={() => setShowDevicesModal(false)} className="px-4 py-1.5 text-xs opacity-60 hover:opacity-100">
+              <button
+                onClick={() => setShowDevicesModal(false)}
+                className="px-4 py-1.5 text-xs opacity-60 hover:opacity-100"
+              >
                 Close
               </button>
             </div>
@@ -2474,43 +2855,139 @@ export default function HomePage() {
         </div>
       )}
 
-      {/* 12.C: SETTINGS MODAL */}
+      {/* 11.C: EXPANDED SETTINGS MODAL */}
       {showSettingsModal && (
         <div className="fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex items-center justify-center p-4">
           <div className={`w-full max-w-md rounded-3xl p-6 shadow-2xl space-y-5 border ${theme.modal}`}>
             <div className="flex items-center justify-between border-b pb-3 border-inherit">
               <div className="flex items-center gap-2">
                 <Settings className="w-4 h-4 text-emerald-500" />
-                <h3 className="font-bold text-sm">Settings</h3>
+                <h3 className="font-bold text-sm">TrackDeck Settings</h3>
               </div>
-              <button onClick={() => setShowSettingsModal(false)} className="opacity-50 hover:opacity-100 p-1">
+              <button
+                onClick={() => setShowSettingsModal(false)}
+                className="opacity-50 hover:opacity-100 p-1"
+              >
                 <X className="w-4 h-4" />
               </button>
             </div>
 
-            <div className="space-y-3 text-xs opacity-70">
-              <p>• <strong>Authentication:</strong> Running via secure server cookies.</p>
-              <p>• <strong>AI Copilot:</strong> Running Gemini via server environment variables.</p>
-              <p>• <strong>School Wi-Fi Bypass:</strong> Active via Vercel cloud tunnel.</p>
+            <div className="space-y-4 text-xs">
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <span className="font-semibold">Playback Sync Speed</span>
+                  <span className="text-[10px] opacity-60">Saves quota & battery</span>
+                </div>
+                <div className="grid grid-cols-3 gap-1.5">
+                  {[
+                    { label: 'Fast (1.5s)', ms: 1500 as const },
+                    { label: 'Balanced (3s)', ms: 3000 as const },
+                    { label: 'Saver (5s)', ms: 5000 as const },
+                  ].map((opt) => (
+                    <button
+                      key={opt.ms}
+                      onClick={() => updateSetting('pollIntervalMs', opt.ms)}
+                      className={`py-1.5 px-2 rounded-xl border text-[11px] font-semibold transition-all ${
+                        settings.pollIntervalMs === opt.ms
+                          ? 'border-emerald-500 bg-emerald-500/15 text-emerald-300'
+                          : 'border-white/10 opacity-70 hover:opacity-100'
+                      }`}
+                    >
+                      {opt.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {(
+                [
+                  {
+                    key: 'autoWakeDevice',
+                    title: 'Auto-Wake Sleeping Device',
+                    desc: 'Transfers playback to an available device if none is active.',
+                  },
+                  {
+                    key: 'autoScrollLyrics',
+                    title: 'Auto-Scroll Karaoke Lyrics',
+                    desc: 'Keep the active lyric line centered automatically.',
+                  },
+                  {
+                    key: 'showSonicDna',
+                    title: 'Show Sonic DNA Badge',
+                    desc: 'Display BPM, key & energy when Spotify permits.',
+                  },
+                ] as const
+              ).map((toggle) => {
+                const enabled = settings[toggle.key];
+                return (
+                  <div
+                    key={toggle.key}
+                    className="flex items-center justify-between gap-3 p-2.5 rounded-xl bg-white/5 border border-white/10"
+                  >
+                    <div>
+                      <p className="font-semibold">{toggle.title}</p>
+                      <p className="text-[10px] opacity-60">{toggle.desc}</p>
+                    </div>
+                    <button
+                      onClick={() => updateSetting(toggle.key, !enabled)}
+                      className={`w-10 h-5 rounded-full transition-colors p-0.5 shrink-0 ${
+                        enabled ? 'bg-emerald-500' : 'bg-white/20'
+                      }`}
+                    >
+                      <div
+                        className={`w-4 h-4 rounded-full bg-white transition-transform ${
+                          enabled ? 'translate-x-5' : 'translate-x-0'
+                        }`}
+                      />
+                    </button>
+                  </div>
+                );
+              })}
+
+              <div className="space-y-2 pt-2 border-t border-inherit">
+                <div className="flex items-center justify-between">
+                  <span className="opacity-70">AI Copilot Status</span>
+                  <button
+                    onClick={() => toggleCopilot(!copilotEnabled)}
+                    className={`px-3 py-1 rounded-lg font-bold flex items-center gap-1 ${
+                      copilotEnabled
+                        ? 'bg-rose-500/20 hover:bg-rose-500/30 text-rose-300'
+                        : 'bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300'
+                    }`}
+                  >
+                    <Power className="w-3 h-3" />
+                    {copilotEnabled ? 'Disconnect Copilot' : 'Reconnect Copilot'}
+                  </button>
+                </div>
+
+                <div className="flex items-center justify-between">
+                  <span className="opacity-70">Visual & App Preferences</span>
+                  <button
+                    onClick={resetPreferences}
+                    className="px-3 py-1 rounded-lg bg-white/10 hover:bg-white/20 font-semibold flex items-center gap-1"
+                  >
+                    <RotateCcw className="w-3 h-3" /> Reset Defaults
+                  </button>
+                </div>
+              </div>
             </div>
 
             <div className="border-t pt-3 border-inherit flex justify-between items-center">
               {isAuthenticated ? (
                 <a
                   href="/api/auth/logout"
-                  className="px-4 py-2 bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 font-bold rounded-xl text-xs transition-colors"
+                  className="px-4 py-2 bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 font-bold rounded-xl text-xs flex items-center gap-1.5 transition-colors"
                 >
-                  Log Out of Spotify
+                  <LogOut className="w-3.5 h-3.5" /> Log Out of Spotify
                 </a>
               ) : (
                 <a
                   href="/api/auth/login"
-                  className="px-4 py-2 bg-emerald-500 hover:bg-emerald-400 text-black font-bold rounded-xl text-xs transition-colors"
+                  className="px-4 py-2 bg-emerald-500 hover:bg-emerald-400 text-black font-bold rounded-xl text-xs flex items-center gap-1.5 transition-colors"
                 >
-                  Connect Spotify
+                  <LogIn className="w-3.5 h-3.5" /> Connect Spotify
                 </a>
               )}
-
               <button
                 onClick={() => setShowSettingsModal(false)}
                 className="px-4 py-2 text-xs opacity-60 hover:opacity-100"
