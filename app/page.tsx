@@ -1701,6 +1701,25 @@ export default function HomePage() {
               )}
             </div>
 
+            <div className="flex items-center justify-between p-2.5 rounded-xl bg-white/5 border border-white/10 text-xs">
+                      <div>
+                        <p className="font-semibold">Deck Backdrop Box</p>
+                        <p className="text-[10px] opacity-60">Frosted glass card behind cover art & controls</p>
+                      </div>
+                      <button
+                        onClick={() => {
+                          const next = !showDeckBox;
+                          setShowDeckBox(next);
+                          updateParam('trackdeck_deck_box', String(next));
+                        }}
+                        className={`w-10 h-5 rounded-full transition-colors p-0.5 shrink-0 ${
+                          showDeckBox ? 'bg-emerald-500' : 'bg-white/20'
+                        }`}
+                      >
+                        <div className={`w-4 h-4 rounded-full bg-white transition-transform ${showDeckBox ? 'translate-x-5' : 'translate-x-0'}`} />
+                      </button>
+                    </div>
+
             <div className="flex-1 overflow-y-auto p-2 space-y-1.5 no-scrollbar">
               {selectedPlaylist ? (
                 <div className="space-y-3">
@@ -1773,7 +1792,16 @@ export default function HomePage() {
               <button onClick={() => setCenterMode('lyrics')} className={`p-1.5 rounded-lg text-xs transition-colors ${centerMode === 'lyrics' ? theme.accentBtn : 'opacity-60 hover:opacity-100'}`} title="Synced Karaoke Lyrics"><Mic2 className="w-3.5 h-3.5" /></button>
             </div>
 
-            <div className={w-full max-w-md
+            {centerMode === 'deck' ? (
+              <div
+                className={`w-full max-w-md p-5 rounded-3xl flex flex-col items-center text-center transition-all duration-500 z-10 ${
+                  showDeckBox
+                    ? `border shadow-2xl backdrop-blur-3xl ${theme.panel}`
+                    : `bg-transparent border-transparent shadow-none ${
+                        colorTheme === 'light' ? '' : 'drop-shadow-[0_2px_12px_rgba(0,0,0,0.75)]'
+                      }`
+                }`}
+              >
                 <div className={`relative aspect-square rounded-2xl overflow-hidden border shadow-2xl mb-3.5 group flex items-center justify-center transition-all duration-500 ${layout === 'cinema' ? 'w-48 md:w-64 shadow-[0_25px_60px_rgba(0,0,0,0.9)]' : 'w-40 sm:w-48 md:w-52'} bg-black/40 border-white/10`}>
                   {resolvedAlbumArt ? (
                     <>
