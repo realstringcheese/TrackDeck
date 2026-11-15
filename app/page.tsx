@@ -1410,16 +1410,6 @@ export default function HomePage() {
     }
   }
 
-  async function handlePlayPlaylist(playlistUri: string) {
-    if (!isAuthenticated || !playlistUri) return;
-    const devId = activeDeviceId.current || (await ensureActiveDeviceOrWake());
-    const devParam = devId ? `?device_id=${devId}` : '';
-    await callSpotify(`/me/player/play${devParam}`, 'PUT', { context_uri: playlistUri });
-    setTimeout(() => {
-      fetchNowPlaying();
-      loadQueue();
-    }, 800);
-  }
 
   function handleUploadSongCover(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
@@ -2201,7 +2191,6 @@ export default function HomePage() {
                       {selectedPlaylist.tracks?.total ?? 0} songs
                     </p>
                     <button
-                      <div className="mt-2 flex items-center justify-center gap-1.5">
                       <button
                         onClick={() => handlePlayPlaylist(selectedPlaylist.uri, false)}
                         className={`px-3 py-1 text-[11px] font-bold rounded-full transition-transform hover:scale-105 active:scale-95 shadow-md ${theme.accentBtn}`}
@@ -2235,11 +2224,6 @@ export default function HomePage() {
                         )}
                       </button>
                     </div>
-
-                  <div className={`space-y-0.5 border-t pt-2 ${theme.border}`}>
-                    {isLoadingTracks ? (
-                      <div className="p-4 text-center text-xs opacity-50 animate-pulse">
-                        Loading songs...
                       </div>
                     ) : (
                       playlistTracks.map((track, idx) => (
