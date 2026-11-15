@@ -123,8 +123,8 @@ export async function POST(req: NextRequest) {
     nowPlayingContext,
     'Rules:',
     '- If the user wants to control playback, set "command" to "play", "pause", "next", "prev", or "queue". Otherwise set "command" to "none".',
-    '- If "command" is "play" for a specific track/artist or "queue", set "query" to a clean Spotify search query. Otherwise set "query" to "".',
-    '- For resume/unpause with no specific song, set "command" to "play" and "query" to "".',
+    '- If the user says "unpause", "resume", "continue", "keep playing", or "play" with no specific song/artist name, you MUST set "command" to "play" and "query" to "".',
+    '- Only set "query" to a song/artist search string when a specific track or artist is requested.',
     '- Keep "message" concise and conversational.',
   ].join('\n');
 

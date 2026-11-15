@@ -15,7 +15,7 @@ function inferFallbackCommand(
   const clean = prompt.trim();
   if (!clean || clean.endsWith('?')) return { command: null, query: null };
 
-  if (/^(?:pause|stop)(?:\s+(?:the\s+)?(?:music|song|track|it))?$/i.test(clean)) {
+  if (/^(?:pause|stop)(?:\s+(?:the\s+)?(?:music|song|track|it|playback))?$/i.test(clean)) {
     return { command: 'pause', query: null };
   }
   if (/^(?:skip|next)(?:\s+(?:song|track))?$/i.test(clean)) {
@@ -24,7 +24,11 @@ function inferFallbackCommand(
   if (/^(?:prev|previous|go back|back)(?:\s+(?:song|track))?$/i.test(clean)) {
     return { command: 'prev', query: null };
   }
-  if (/^(?:play|resume|unpause)(?:\s+(?:the\s+)?(?:music|song|track|it))?$/i.test(clean)) {
+  if (
+    /^(?:play|resume|unpause|continue|start)(?:\s+(?:the\s+|this\s+)?(?:music|song|track|it|playback|again))?$/i.test(
+      clean
+    )
+  ) {
     return { command: 'play', query: null };
   }
 

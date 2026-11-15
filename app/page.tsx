@@ -52,6 +52,9 @@ import {
   Wand2,
   X,
   Zap,
+  Repeat,
+  Repeat1,
+  Shuffle,
 } from 'lucide-react';
 import { askGemini, ChatMessage, CopilotResponse } from '@/lib/gemini';
 import { fetchSyncedLyrics, LyricLine } from '@/lib/lyrics';
@@ -153,6 +156,8 @@ interface SpotifyCallResult<T = Record<string, unknown>> {
 interface SpotifyPlayerApiResponse {
   is_playing?: boolean;
   progress_ms?: number;
+  shuffle_state?: boolean;
+  repeat_state?: 'off' | 'context' | 'track';
   device?: { id?: string; name?: string };
   item?: {
     id?: string;
@@ -530,6 +535,8 @@ export default function HomePage() {
   const [statusBanner, setStatusBanner] = useState<string | null>(null);
 
   const [playback, setPlayback] = useState<PlaybackState | null>(null);
+  const [isShuffled, setIsShuffled] = useState(false);
+  const [repeatMode, setRepeatMode] = useState<'off' | 'context' | 'track'>('off');
   const [showAccountMenu, setShowAccountMenu] = useState(false);
   const [accountView, setAccountView] = useState<'profile' | 'stats'>('profile');
   const [statsTimeframe, setStatsTimeframe] = useState<'short_term' | 'long_term'>('short_term');
@@ -660,14 +667,18 @@ export default function HomePage() {
   }, [callSpotify]);
 
   const loadQueue = useCallback(async () => {
-    const res = await callSpotify<{ queue?: TrackItem[] }>(
+    const res = await callSpotify<{ currently_playing?: unknown; queue?: TrackItem[] }>(
       '/me/player/queue',
       'GET',
       undefined,
       true
     );
     if (res.ok && Array.isArray(res.data?.queue)) {
-      setQueue(res.data.queue.filter(Boolean).slice(0, 15));
+      const incoming = res.data.queue.filter(Boolean).slice(0, 15);
+      const hasCurrent = Boolean(res.data.currently_playing);
+      if (incoming.length > 0 || hasCurrent) {
+        setQueue(incoming);
+      }
     }
   }, [callSpotify]);
 
@@ -678,6 +689,8 @@ export default function HomePage() {
     if (res.ok && res.data?.item) {
       const data = res.data;
       if (data.device?.id) activeDeviceId.current = data.device.id;
+      if (typeof data.shuffle_state === 'boolean') setIsShuffled(data.shuffle_state);
+      if (data.repeat_state) setRepeatMode(data.repeat_state);
 
       const isPlaying = Boolean(data.is_playing);
       const serverProgress = data.progress_ms || 0;
@@ -1193,18 +1206,33 @@ export default function HomePage() {
   // ==========================================================================
   // SECTION 7: PLAYBACK, CUSTOM SONG COVER & DEVICE CONTROLS
   // ==========================================================================
-  async function ensureActiveDeviceOrWake(): Promise<string | null> {
-    if (activeDeviceId.current) return activeDeviceId.current;
+  async function ensureActiveDeviceOrWake(
+    forceTransfer: boolean = false,
+    autoPlayOnTransfer: boolean = true
+  ): Promise<string | null> {
     const found = await loadDevices();
-    if (found.length > 0 && settings.autoWakeDevice) {
-      const target = found[0];
-      activeDeviceId.current = target.id;
-      await callSpotify('/me/player', 'PUT', { device_ids: [target.id], play: true });
-      setStatusBanner(`Waking up ${target.name}...`);
-      return target.id;
+    if (found.length === 0) {
+      setStatusBanner('No Spotify device found. Open Spotify once on your phone or PC.');
+      return null;
     }
-    setStatusBanner('No active Spotify device found. Open Spotify once on your phone or PC.');
-    return null;
+
+    const active = found.find((d) => d.is_active);
+    if (active && !forceTransfer) {
+      activeDeviceId.current = active.id;
+      return active.id;
+    }
+
+    const target = found.find((d) => d.id === activeDeviceId.current) || found[0];
+    activeDeviceId.current = target.id;
+
+    if (forceTransfer || settings.autoWakeDevice) {
+      await callSpotify('/me/player', 'PUT', {
+        device_ids: [target.id],
+        play: autoPlayOnTransfer,
+      });
+      setStatusBanner(`Waking up ${target.name}...`);
+    }
+    return target.id;
   }
 
   async function handleTransferDevice(devId: string) {
@@ -1225,7 +1253,7 @@ export default function HomePage() {
       return;
     }
     if (!playback) {
-      const wokeId = await ensureActiveDeviceOrWake();
+      const wokeId = await ensureActiveDeviceOrWake(true, true);
       if (wokeId) setTimeout(fetchNowPlaying, 800);
       return;
     }
@@ -1238,15 +1266,79 @@ export default function HomePage() {
     );
 
     const res = await callSpotify(`/me/player/${targetState ? 'play' : 'pause'}${devParam}`, 'PUT');
-    if (res.status === 404 && targetState) {
-      const wokeId = await ensureActiveDeviceOrWake();
-      if (wokeId) await callSpotify(`/me/player/play?device_id=${wokeId}`, 'PUT');
+    if (!res.ok && targetState && (res.status === 404 || res.status === 403)) {
+      const wokeId = await ensureActiveDeviceOrWake(true, true);
+      if (wokeId) {
+        await callSpotify(`/me/player/play?device_id=${wokeId}`, 'PUT');
+      }
     }
 
     setTimeout(() => {
       isActionPending.current = false;
       fetchNowPlaying();
-    }, 450);
+    }, 550);
+  }
+
+  async function toggleShuffle(forceState?: boolean) {
+    if (!isAuthenticated) return;
+    const next = typeof forceState === 'boolean' ? forceState : !isShuffled;
+    const devParam = activeDeviceId.current
+      ? `&device_id=${encodeURIComponent(activeDeviceId.current)}`
+      : '';
+    isActionPending.current = true;
+    setIsShuffled(next);
+    await callSpotify(`/me/player/shuffle?state=${next}${devParam}`, 'PUT');
+    setTimeout(() => {
+      isActionPending.current = false;
+    }, 500);
+  }
+
+  async function cycleRepeat() {
+    if (!isAuthenticated) return;
+    const order: ('off' | 'context' | 'track')[] = ['off', 'context', 'track'];
+    const next = order[(order.indexOf(repeatMode) + 1) % order.length];
+    const devParam = activeDeviceId.current
+      ? `&device_id=${encodeURIComponent(activeDeviceId.current)}`
+      : '';
+    isActionPending.current = true;
+    setRepeatMode(next);
+    await callSpotify(`/me/player/repeat?state=${next}${devParam}`, 'PUT');
+    setTimeout(() => {
+      isActionPending.current = false;
+    }, 500);
+  }
+
+  async function handlePlayPlaylist(playlistUri: string, forceShuffle?: boolean) {
+    if (!isAuthenticated || !playlistUri) return;
+    const targetShuffle = typeof forceShuffle === 'boolean' ? forceShuffle : isShuffled;
+    if (typeof forceShuffle === 'boolean') setIsShuffled(forceShuffle);
+
+    const devId = await ensureActiveDeviceOrWake(false, false);
+    const devParam = devId ? `?device_id=${devId}` : '';
+    let res = await callSpotify(`/me/player/play${devParam}`, 'PUT', {
+      context_uri: playlistUri,
+    });
+
+    if (!res.ok && (res.status === 404 || res.status === 403)) {
+      const wokeId = await ensureActiveDeviceOrWake(true, false);
+      if (wokeId) {
+        res = await callSpotify(`/me/player/play?device_id=${wokeId}`, 'PUT', {
+          context_uri: playlistUri,
+        });
+      }
+    }
+
+    setTimeout(async () => {
+      const idParam = activeDeviceId.current
+        ? `&device_id=${encodeURIComponent(activeDeviceId.current)}`
+        : '';
+      await callSpotify(`/me/player/shuffle?state=${targetShuffle}${idParam}`, 'PUT', undefined, true);
+      if (repeatMode !== 'off') {
+        await callSpotify(`/me/player/repeat?state=${repeatMode}${idParam}`, 'PUT', undefined, true);
+      }
+      fetchNowPlaying();
+      loadQueue();
+    }, 700);
   }
 
   async function handleNext() {
@@ -1391,23 +1483,44 @@ export default function HomePage() {
     if (!command || !isAuthenticated) return;
 
     isActionPending.current = true;
-    const devId = activeDeviceId.current || (await ensureActiveDeviceOrWake());
+    const devId = await ensureActiveDeviceOrWake(false, false);
     const devParam = devId ? `?device_id=${devId}` : '';
 
     try {
       if (command === 'play') {
         const isGeneric =
-          !query || /^(play|music|song|the song|it|unpause|resume|track)$/i.test(query.trim());
+          !query ||
+          /^(play|music|song|the song|current song|current track|it|unpause|resume|continue|playback|resume playback|track)$/i.test(
+            query.trim()
+          );
+
         if (!isGeneric && query) {
           const searchRes = await callSpotify<{ tracks?: { items?: TrackItem[] } }>(
             `/search?q=${encodeURIComponent(query)}&type=track&limit=5`
           );
           const track = searchRes.data?.tracks?.items?.[0];
           if (track?.uri) {
-            await callSpotify(`/me/player/play${devParam}`, 'PUT', { uris: [track.uri] });
+            const playRes = await callSpotify(`/me/player/play${devParam}`, 'PUT', {
+              uris: [track.uri],
+            });
+            if (!playRes.ok && (playRes.status === 404 || playRes.status === 403)) {
+              const wokeId = await ensureActiveDeviceOrWake(true, false);
+              if (wokeId) {
+                await callSpotify(`/me/player/play?device_id=${wokeId}`, 'PUT', {
+                  uris: [track.uri],
+                });
+              }
+            }
           }
         } else {
-          await callSpotify(`/me/player/play${devParam}`, 'PUT');
+          // Resume without wiping current track/queue
+          const resumeRes = await callSpotify(`/me/player/play${devParam}`, 'PUT');
+          if (!resumeRes.ok && (resumeRes.status === 404 || resumeRes.status === 403)) {
+            const wokeId = await ensureActiveDeviceOrWake(true, true);
+            if (wokeId) {
+              await callSpotify(`/me/player/play?device_id=${wokeId}`, 'PUT');
+            }
+          }
         }
       }
 
@@ -1430,7 +1543,7 @@ export default function HomePage() {
         isActionPending.current = false;
         fetchNowPlaying();
         loadQueue();
-      }, 700);
+      }, 750);
     }
   }
 
@@ -2088,12 +2201,40 @@ export default function HomePage() {
                       {selectedPlaylist.tracks?.total ?? 0} songs
                     </p>
                     <button
-                      onClick={() => handlePlayPlaylist(selectedPlaylist.uri)}
-                      className={`mt-2 px-3 py-1 text-[11px] font-bold rounded-full transition-transform hover:scale-105 active:scale-95 shadow-md ${theme.accentBtn}`}
-                    >
-                      Play
-                    </button>
-                  </div>
+                      <div className="mt-2 flex items-center justify-center gap-1.5">
+                      <button
+                        onClick={() => handlePlayPlaylist(selectedPlaylist.uri, false)}
+                        className={`px-3 py-1 text-[11px] font-bold rounded-full transition-transform hover:scale-105 active:scale-95 shadow-md ${theme.accentBtn}`}
+                      >
+                        Play
+                      </button>
+                      <button
+                        onClick={() => handlePlayPlaylist(selectedPlaylist.uri, true)}
+                        title="Shuffle Play Playlist"
+                        className={`px-2.5 py-1 text-[11px] font-bold rounded-full border flex items-center gap-1 transition-all ${
+                          isShuffled
+                            ? 'border-emerald-500 bg-emerald-500/20 text-emerald-300'
+                            : 'border-white/15 bg-white/5 hover:bg-white/10'
+                        }`}
+                      >
+                        <Shuffle className="w-3 h-3" /> Shuffle
+                      </button>
+                      <button
+                        onClick={cycleRepeat}
+                        title={`Repeat: ${repeatMode}`}
+                        className={`p-1.5 rounded-full border transition-all ${
+                          repeatMode !== 'off'
+                            ? 'border-emerald-500 bg-emerald-500/20 text-emerald-300'
+                            : 'border-white/15 bg-white/5 opacity-70 hover:opacity-100'
+                        }`}
+                      >
+                        {repeatMode === 'track' ? (
+                          <Repeat1 className="w-3 h-3" />
+                        ) : (
+                          <Repeat className="w-3 h-3" />
+                        )}
+                      </button>
+                    </div>
 
                   <div className={`space-y-0.5 border-t pt-2 ${theme.border}`}>
                     {isLoadingTracks ? (
@@ -2328,7 +2469,56 @@ export default function HomePage() {
                   </div>
                 </div>
 
-                <div className="flex items-center justify-center gap-8">
+                <div className="flex items-center justify-center gap-5">
+                  <button
+                    onClick={() => toggleShuffle()}
+                    disabled={!isAuthenticated}
+                    title={isShuffled ? 'Shuffle On' : 'Shuffle Off'}
+                    className={`p-2 transition-all disabled:opacity-30 ${
+                      isShuffled ? theme.accentText : 'opacity-50 hover:opacity-100'
+                    }`}
+                  >
+                    <Shuffle className="w-4 h-4" />
+                  </button>
+                  <button
+                    onClick={handlePrev}
+                    disabled={!isAuthenticated}
+                    className="p-2 opacity-70 hover:opacity-100 active:scale-90 disabled:opacity-30 transition-all"
+                  >
+                    <SkipBack className="w-5 h-5" />
+                  </button>
+                  <button
+                    onClick={togglePlay}
+                    className={`p-3.5 rounded-2xl shadow-xl transition-all hover:scale-105 active:scale-95 ${theme.accentBtn}`}
+                  >
+                    {playback?.isPlaying ? (
+                      <Pause className="w-5 h-5 fill-current" />
+                    ) : (
+                      <Play className="w-5 h-5 fill-current ml-0.5" />
+                    )}
+                  </button>
+                  <button
+                    onClick={handleNext}
+                    disabled={!isAuthenticated}
+                    className="p-2 opacity-70 hover:opacity-100 active:scale-90 disabled:opacity-30 transition-all"
+                  >
+                    <SkipForward className="w-5 h-5" />
+                  </button>
+                  <button
+                    onClick={cycleRepeat}
+                    disabled={!isAuthenticated}
+                    title={`Repeat: ${repeatMode}`}
+                    className={`p-2 transition-all disabled:opacity-30 ${
+                      repeatMode !== 'off' ? theme.accentText : 'opacity-50 hover:opacity-100'
+                    }`}
+                  >
+                    {repeatMode === 'track' ? (
+                      <Repeat1 className="w-4 h-4" />
+                    ) : (
+                      <Repeat className="w-4 h-4" />
+                    )}
+                  </button>
+                </div>
                   <button
                     onClick={handlePrev}
                     disabled={!isAuthenticated}
