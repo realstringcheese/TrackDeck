@@ -786,21 +786,49 @@ export default function HomePage() {
   // ==========================================================================
   // SECTION 7: PLAYBACK, CUSTOM SONG COVER, SHUFFLE/REPEAT & DEVICES
   // ==========================================================================
-  async function ensureActiveDeviceOrWake(forceTransfer = false, autoPlayOnTransfer = true): Promise<string | null> {
+  
+  async function ensureActiveDeviceOrWake(
+    forceTransfer = false,
+    autoPlayOnTransfer = true
+  ): Promise<string | null> {
+    if (!forceTransfer && activeDeviceId.current) {
+      return activeDeviceId.current;
+    }
+
     const found = await loadDevices();
-    if (found.length === 0) {
-      setStatusBanner('No Spotify device found. Open Spotify once on your phone or PC.');
-      return null;
+    if (found.length > 0) {
+      const active = found.find((d) => d.is_active);
+      if (active && !forceTransfer) {
+        activeDeviceId.current = active.id;
+        return active.id;
+      }
+      const target = found.find((d) => d.id === activeDeviceId.current) || found[0];
+      activeDeviceId.current = target.id;
+      if (forceTransfer || settings.autoWakeDevice) {
+        await callSpotify('/me/player', 'PUT', {
+          device_ids: [target.id],
+          play: autoPlayOnTransfer,
+        }, true);
+        setStatusBanner(`Waking up ${target.name}...`);
+      }
+      return target.id;
     }
-    const active = found.find((d) => d.is_active);
-    if (active && !forceTransfer) { activeDeviceId.current = active.id; return active.id; }
-    const target = found.find((d) => d.id === activeDeviceId.current) || found[0];
-    activeDeviceId.current = target.id;
-    if (forceTransfer || settings.autoWakeDevice) {
-      await callSpotify('/me/player', 'PUT', { device_ids: [target.id], play: autoPlayOnTransfer });
-      setStatusBanner(`Waking up ${target.name}...`);
+
+    // Mobile OS often hides paused devices from /devices — try waking last known ID directly once
+    if (activeDeviceId.current) {
+      const wakeRes = await callSpotify('/me/player', 'PUT', {
+        device_ids: [activeDeviceId.current],
+        play: autoPlayOnTransfer,
+      }, true);
+      if (wakeRes.ok) {
+        return activeDeviceId.current;
+      }
     }
-    return target.id;
+
+    setStatusBanner(
+      'Spotify went to sleep after pausing (iOS/Android suspends background audio). Open Spotify on your phone once to wake it.'
+    );
+    return null;
   }
 
   async function handleTransferDevice(devId: string) {
