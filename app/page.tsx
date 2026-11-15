@@ -22,6 +22,7 @@ interface Playlist {
   name: string;
   images?: { url: string }[];
   tracks?: { total: number };
+  items?: { total: number };
   uri: string;
 }
 
@@ -549,9 +550,23 @@ export default function HomePage() {
     if (!playlist?.id) return;
     setSelectedPlaylist(playlist);
     setIsLoadingTracks(true);
-    const res = await callSpotify<{ items?: { track?: TrackItem }[] }>(`/playlists/${playlist.id}/tracks?limit=50`);
+    let res = await callSpotify<{ items?: { item?: TrackItem; track?: TrackItem }[] }>(
+      `/playlists/${playlist.id}/items?limit=50`,
+      'GET',
+      undefined,
+      true
+    );
+    if (!res.ok) {
+      res = await callSpotify<{ items?: { item?: TrackItem; track?: TrackItem }[] }>(
+        `/playlists/${playlist.id}/tracks?limit=50`
+      );
+    }
     if (res.ok && Array.isArray(res.data?.items)) {
-      setPlaylistTracks(res.data.items.map((item) => item?.track).filter((t): t is TrackItem => Boolean(t && t.id && t.name)));
+      setPlaylistTracks(
+        res.data.items
+          .map((entry) => entry?.item || entry?.track)
+          .filter((t): t is TrackItem => Boolean(t && t.id && t.name))
+      );
     }
     setIsLoadingTracks(false);
   }
@@ -1242,7 +1257,7 @@ export default function HomePage() {
       return filtered.slice(0, 6).map((p) => ({
         id: p.id,
         label: p.name,
-        sublabel: `${p.tracks?.total ?? 0} songs${playlistHits[p.uri] ? ` • Played ${playlistHits[p.uri]}x` : ''}`,
+        sublabel: `${p.items?.total ?? p.tracks?.total ?? 0} songs${playlistHits[p.uri] ? ` • Played ${playlistHits[p.uri]}x` : ''}`,
         fillText: `${cmd} ${p.name}`,
         executeImmediately: true,
         action: () => {
@@ -1692,7 +1707,10 @@ export default function HomePage() {
                       <div className="w-28 h-28 mx-auto rounded-2xl bg-white/5 border border-white/10 flex items-center justify-center mb-2"><Music2 className="w-8 h-8 opacity-40" /></div>
                     )}
                     <h3 className="font-bold text-xs truncate">{selectedPlaylist.name}</h3>
-                    <p className="text-[10px] opacity-60">{selectedPlaylist.tracks?.total ?? 0} songs</p>
+                    <p className="text-[10px] opacity-60">
+                      {selectedPlaylist.items?.total ?? selectedPlaylist.tracks?.total ?? 0} songs
+                    </p>
+                    <div className="mt-2 flex items-center justify-center gap-1.5">
                     <div className="mt-2 flex items-center justify-center gap-1.5">
                       <button onClick={() => handlePlayPlaylist(selectedPlaylist.uri, false)} className={`px-3 py-1 text-[11px] font-bold rounded-full transition-transform hover:scale-105 active:scale-95 shadow-md ${theme.accentBtn}`}>Play</button>
                       <button onClick={() => handlePlayPlaylist(selectedPlaylist.uri, true)} title="Shuffle Play Playlist" className={`px-2.5 py-1 text-[11px] font-bold rounded-full border flex items-center gap-1 transition-all ${isShuffled ? 'border-emerald-500 bg-emerald-500/20 text-emerald-300' : 'border-white/15 bg-white/5 hover:bg-white/10'}`}>
@@ -1730,8 +1748,12 @@ export default function HomePage() {
                   <div key={pl.id} onClick={() => openPlaylistInspector(pl)} className="group rounded-xl cursor-pointer hover:bg-white/10 transition-all flex items-center gap-3 p-2">
                     {pl.images?.[0]?.url ? <img src={pl.images[0].url} alt={pl.name} className="w-10 h-10 rounded-lg object-cover shadow-sm shrink-0" /> : <div className="w-10 h-10 rounded-lg bg-white/5 border border-white/10 flex items-center justify-center shrink-0"><Music2 className="w-4 h-4 opacity-50" /></div>}
                     <div className="truncate flex-1">
-                      <p className={`text-xs font-semibold truncate transition-colors ${theme.hoverAccentText}`}>{pl.name}</p>
-                      <p className="text-[10px] opacity-60">{pl.tracks?.total ?? 0} songs</p>
+                      <p className={`text-xs font-semibold truncate transition-colors ${theme.hoverAccentText}`}>
+                        {pl.name}
+                      </p>
+                      <p className="text-[10px] opacity-60">
+                        {pl.items?.total ?? pl.tracks?.total ?? 0} songs
+                      </p>
                     </div>
                   </div>
                 ))
