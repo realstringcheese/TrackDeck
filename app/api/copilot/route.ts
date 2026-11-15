@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 
-type CopilotCommand = 'play' | 'pause' | 'next' | 'prev' | 'queue' | null;
+type CopilotCommand = 'play' | 'playlist' | 'pause' | 'next' | 'prev' | 'queue' | null;
 
 interface ChatMessage {
   role: 'user' | 'model';
@@ -23,6 +23,7 @@ interface CopilotRequestBody {
   playback?: PlaybackContext | null;
   currentTrackInfo?: PlaybackContext | null;
   customApiKey?: string;
+  playlists?: { name: string; uri: string }[];
 }
 
 interface GeminiResponse {
@@ -30,7 +31,7 @@ interface GeminiResponse {
   error?: { message?: string };
 }
 
-const VALID_COMMANDS = new Set(['play', 'pause', 'next', 'prev', 'queue']);
+const VALID_COMMANDS = new Set(['play', 'playlist', 'pause', 'next', 'prev', 'queue']);
 
 export async function GET() {
   const hasServerKey = Boolean(process.env.GEMINI_API_KEY?.trim());
@@ -118,13 +119,19 @@ export async function POST(req: NextRequest) {
     ? `Currently ${pb.isPlaying ? 'playing' : 'paused'}: "${pb.name}" by ${pb.artist || 'Unknown Artist'}${pb.album ? ` (Album: ${pb.album})` : ''}.`
     : 'Nothing is currently playing.';
 
+  const playlistList = Array.isArray(body.playlists) && body.playlists.length > 0
+    ? body.playlists.slice(0, 25).map((p) => `"${p.name}"`).join(', ')
+    : 'None loaded';
+
   const systemPrompt = [
     'You are TrackDeck Copilot, a fast AI music companion and Spotify controller.',
     nowPlayingContext,
+    `User playlists: ${playlistList}.`,
+    'Available user slash commands: /play <song>, /playlist <name>, /shuffle <playlist?>, /pause, /resume, /next, /prev, /queue <song>, /repeat <off|all|track>, /lyrics, /vibe <preset>.',
     'Rules:',
-    '- If the user wants to control playback, set "command" to "play", "pause", "next", "prev", or "queue". Otherwise set "command" to "none".',
-    '- If the user says "unpause", "resume", "continue", "keep playing", or "play" with no specific song/artist name, you MUST set "command" to "play" and "query" to "".',
-    '- Only set "query" to a song/artist search string when a specific track or artist is requested.',
+    '- If the user wants to control playback, set "command" to "play", "playlist", "pause", "next", "prev", or "queue". Otherwise set "command" to "none".',
+    '- If the user asks to play a playlist (e.g. "play my 40 playlist" or "put on Chill Vibes"), set "command" to "playlist" and set "query" to the matching playlist name from User playlists.',
+    '- If the user says "unpause", "resume", "continue", or "play" with no specific song/artist, set "command" to "play" and "query" to "".',
     '- Keep "message" concise and conversational.',
   ].join('\n');
 
@@ -139,7 +146,7 @@ export async function POST(req: NextRequest) {
           message: { type: 'STRING' },
           command: {
             type: 'STRING',
-            enum: ['play', 'pause', 'next', 'prev', 'queue', 'none'],
+            enum: ['play', 'playlist', 'pause', 'next', 'prev', 'queue', 'none'],
           },
           query: { type: 'STRING' },
         },

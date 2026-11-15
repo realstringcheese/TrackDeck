@@ -1,6 +1,6 @@
 export interface CopilotResponse {
   message: string;
-  command: 'play' | 'pause' | 'next' | 'prev' | 'queue' | null;
+  command: 'play' | 'playlist' | 'pause' | 'next' | 'prev' | 'queue' | null;
   query: string | null;
 }
 
@@ -37,6 +37,11 @@ function inferFallbackCommand(
     return { command: 'queue', query: queueMatch[1].trim() };
   }
 
+  const playlistMatch = clean.match(/^(?:play|put on|start)\s+(?:my\s+)?(.+?)\s+playlist$/i);
+  if (playlistMatch?.[1]) {
+    return { command: 'playlist', query: playlistMatch[1].trim() };
+  }
+
   const playMatch = clean.match(/^(?:play|put on)\s+(.+)$/i);
   if (playMatch?.[1] && !/^with\b/i.test(playMatch[1])) {
     return { command: 'play', query: playMatch[1].trim() };
@@ -48,7 +53,8 @@ function inferFallbackCommand(
 export async function askGemini(
   prompt: string,
   history: ChatMessage[],
-  currentTrackInfo?: { name: string; artist: string; album: string; isPlaying: boolean } | null
+  currentTrackInfo?: { name: string; artist: string; album: string; isPlaying: boolean } | null,
+  playlists?: { name: string; uri: string }[]
 ): Promise<CopilotResponse> {
   const customApiKey =
     typeof window !== 'undefined'
@@ -60,10 +66,10 @@ export async function askGemini(
     res = await fetch('/api/copilot', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ prompt, history, currentTrackInfo, customApiKey }),
+      body: JSON.stringify({ prompt, history, currentTrackInfo, playlists, customApiKey }),
     });
   } catch {
-    throw new Error('Could not reach /api/copilot (check server deployment or network)');
+    throw new Error('Could not reach /api/copilot (check deployment or network)');
   }
 
   if (!res.ok) {

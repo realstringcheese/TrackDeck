@@ -127,6 +127,15 @@ interface GeminiKeyCardProps {
   inputClass: string;
 }
 
+interface SlashSuggestion {
+  id: string;
+  label: string;
+  sublabel: string;
+  fillText: string;
+  executeImmediately: boolean;
+  action?: () => void;
+}
+
 type LayoutPreset = 'studio' | 'cinema';
 type ColorPreset = 'dark' | 'light' | 'neon' | 'aqua' | 'amber' | 'oled';
 type BgMode = 'album' | 'gallery' | 'custom';
@@ -168,6 +177,20 @@ const DEFAULT_SETTINGS: AppSettings = {
   autoWakeDevice: true,
   autoScrollLyrics: true,
 };
+
+const SLASH_COMMANDS = [
+  { cmd: '/playlist', desc: 'Play one of your Spotify playlists', needsArg: true },
+  { cmd: '/play', desc: 'Play a song or resume playback', needsArg: true },
+  { cmd: '/shuffle', desc: 'Shuffle play a playlist or toggle shuffle', needsArg: true },
+  { cmd: '/queue', desc: 'Add a track to your queue', needsArg: true },
+  { cmd: '/pause', desc: 'Pause current playback', needsArg: false },
+  { cmd: '/resume', desc: 'Unpause / resume playback', needsArg: false },
+  { cmd: '/next', desc: 'Skip to next track', needsArg: false },
+  { cmd: '/prev', desc: 'Go to previous track', needsArg: false },
+  { cmd: '/repeat', desc: 'Set repeat (off, all, track)', needsArg: true },
+  { cmd: '/lyrics', desc: 'Toggle synced karaoke lyrics', needsArg: false },
+  { cmd: '/vibe', desc: 'Switch atmosphere preset', needsArg: true },
+];
 
 const THEME_CLASSES: Record<
   ColorPreset,
@@ -366,6 +389,9 @@ export default function HomePage() {
   ]);
   const [chatInput, setChatInput] = useState('');
   const [isAiLoading, setIsAiLoading] = useState(false);
+  const [slashIdx, setSlashIdx] = useState(0);
+  const [playlistHits, setPlaylistHits] = useState<Record<string, number>>({});
+  const chatInputRef = useRef<HTMLInputElement | null>(null);
 
   const [showSettingsModal, setShowSettingsModal] = useState(false);
   const [showDevicesModal, setShowDevicesModal] = useState(false);
@@ -567,6 +593,7 @@ export default function HomePage() {
 
     try { const c = localStorage.getItem('trackdeck_song_covers'); if (c) setSongCovers(JSON.parse(c)); } catch {}
     try { const s = localStorage.getItem('trackdeck_settings'); if (s) setSettings({ ...DEFAULT_SETTINGS, ...JSON.parse(s) }); } catch {}
+    try { const hits = localStorage.getItem('trackdeck_playlist_hits'); if (hits) setPlaylistHits(JSON.parse(hits)); } catch {}
 
     detectLocalWeather().then(setLocalWeather);
     fetch('/api/copilot')
@@ -894,6 +921,12 @@ export default function HomePage() {
       if (wokeId) await callSpotify(`/me/player/play?device_id=${wokeId}`, 'PUT', { context_uri: playlistUri });
     }
 
+    setPlaylistHits((prev) => {
+      const next = { ...prev, [playlistUri]: (prev[playlistUri] || 0) + 1 };
+      try { localStorage.setItem('trackdeck_playlist_hits', JSON.stringify(next)); } catch {}
+      return next;
+    });
+
     setTimeout(async () => {
       const idParam = activeDeviceId.current ? `&device_id=${encodeURIComponent(activeDeviceId.current)}` : '';
       await callSpotify(`/me/player/shuffle?state=${targetShuffle}${idParam}`, 'PUT', undefined, true);
@@ -996,6 +1029,21 @@ export default function HomePage() {
   // ==========================================================================
   // SECTION 8: AI COPILOT, GEMINI KEY & SETTINGS CONTROLLERS
   // ==========================================================================
+  function findBestPlaylist(query: string): Playlist | null {
+    const q = query.trim().toLowerCase();
+    if (!q || playlists.length === 0) return null;
+    const exact = playlists.find((p) => p.name.toLowerCase() === q);
+    if (exact) return exact;
+    const starts = playlists
+      .filter((p) => p.name.toLowerCase().startsWith(q))
+      .sort((a, b) => (playlistHits[b.uri] || 0) - (playlistHits[a.uri] || 0));
+    if (starts.length > 0) return starts[0];
+    const includes = playlists
+      .filter((p) => p.name.toLowerCase().includes(q))
+      .sort((a, b) => (playlistHits[b.uri] || 0) - (playlistHits[a.uri] || 0));
+    return includes[0] || null;
+  }
+
   async function executeCopilotCommand(copilot: CopilotResponse) {
     const { command, query } = copilot;
     if (!command || !isAuthenticated) return;
@@ -1004,6 +1052,20 @@ export default function HomePage() {
     const devParam = devId ? `?device_id=${devId}` : '';
 
     try {
+      if (command === 'playlist' && query) {
+        const localMatch = findBestPlaylist(query);
+        if (localMatch) {
+          await handlePlayPlaylist(localMatch.uri);
+          return;
+        }
+        const searchRes = await callSpotify<{ playlists?: { items?: Playlist[] } }>(
+          `/search?q=${encodeURIComponent(query)}&type=playlist&limit=3`
+        );
+        const remote = searchRes.data?.playlists?.items?.find(Boolean);
+        if (remote?.uri) await handlePlayPlaylist(remote.uri);
+        return;
+      }
+
       if (command === 'play') {
         const isGeneric =
           !query ||
@@ -1041,15 +1103,242 @@ export default function HomePage() {
     }
   }
 
+  function runSlashCommandText(rawText: string): boolean {
+    const trimmed = rawText.trim();
+    if (!trimmed.startsWith('/')) return false;
+
+    const spaceIdx = trimmed.indexOf(' ');
+    const cmd = (spaceIdx === -1 ? trimmed : trimmed.slice(0, spaceIdx)).toLowerCase();
+    const arg = spaceIdx === -1 ? '' : trimmed.slice(spaceIdx + 1).trim();
+
+    const logSlash = (reply: string) => {
+      setMessages((prev) => [...prev, { role: 'user', text: trimmed }, { role: 'model', text: reply }]);
+      setChatInput('');
+      setSlashIdx(0);
+    };
+
+    if (cmd === '/playlist') {
+      const matched = arg ? findBestPlaylist(arg) : [...playlists].sort((a, b) => (playlistHits[b.uri] || 0) - (playlistHits[a.uri] || 0))[0];
+      if (matched) {
+        handlePlayPlaylist(matched.uri);
+        logSlash(`Playing playlist "${matched.name}".`);
+      } else if (arg) {
+        executeCopilotCommand({ message: '', command: 'playlist', query: arg });
+        logSlash(`Searching Spotify for playlist "${arg}"...`);
+      } else {
+        logSlash('No playlists loaded yet.');
+      }
+      return true;
+    }
+
+    if (cmd === '/shuffle') {
+      if (arg) {
+        const matched = findBestPlaylist(arg);
+        if (matched) {
+          handlePlayPlaylist(matched.uri, true);
+          logSlash(`Shuffle-playing "${matched.name}".`);
+        } else {
+          logSlash(`Couldn't find playlist "${arg}".`);
+        }
+      } else {
+        toggleShuffle();
+        logSlash(`Shuffle ${!isShuffled ? 'enabled' : 'disabled'}.`);
+      }
+      return true;
+    }
+
+    if (cmd === '/play') {
+      executeCopilotCommand({ message: '', command: 'play', query: arg || null });
+      logSlash(arg ? `Playing "${arg}".` : 'Resuming playback.');
+      return true;
+    }
+
+    if (cmd === '/resume') {
+      executeCopilotCommand({ message: '', command: 'play', query: null });
+      logSlash('Resuming playback.');
+      return true;
+    }
+
+    if (cmd === '/pause') {
+      executeCopilotCommand({ message: '', command: 'pause', query: null });
+      logSlash('Paused playback.');
+      return true;
+    }
+
+    if (cmd === '/next') {
+      executeCopilotCommand({ message: '', command: 'next', query: null });
+      logSlash('Skipped to next track.');
+      return true;
+    }
+
+    if (cmd === '/prev') {
+      executeCopilotCommand({ message: '', command: 'prev', query: null });
+      logSlash('Playing previous track.');
+      return true;
+    }
+
+    if (cmd === '/queue' && arg) {
+      executeCopilotCommand({ message: '', command: 'queue', query: arg });
+      logSlash(`Added "${arg}" to queue.`);
+      return true;
+    }
+
+    if (cmd === '/repeat') {
+      if (arg === 'off' || arg === 'all' || arg === 'context' || arg === 'track') {
+        const mapped = arg === 'all' ? 'context' : arg;
+        setRepeatMode(mapped);
+        callSpotify(`/me/player/repeat?state=${mapped}${activeDeviceId.current ? `&device_id=${encodeURIComponent(activeDeviceId.current)}` : ''}`, 'PUT');
+        logSlash(`Repeat set to ${arg}.`);
+      } else {
+        cycleRepeat();
+        logSlash('Cycled repeat mode.');
+      }
+      return true;
+    }
+
+    if (cmd === '/lyrics') {
+      setCenterMode((m) => (m === 'deck' ? 'lyrics' : 'deck'));
+      logSlash('Toggled synced lyrics view.');
+      return true;
+    }
+
+    if (cmd === '/vibe') {
+      const preset = VIBE_PRESETS.find((v) => v.name.toLowerCase().includes(arg.toLowerCase())) || VIBE_PRESETS[0];
+      applyVibePreset(preset);
+      logSlash(`Applied "${preset.name}" atmosphere.`);
+      return true;
+    }
+
+    return false;
+  }
+
+  function getSlashSuggestions(): SlashSuggestion[] {
+    if (!chatInput.startsWith('/')) return [];
+    const spaceIdx = chatInput.indexOf(' ');
+
+    // Stage 1: Autocomplete slash command itself
+    if (spaceIdx === -1) {
+      const q = chatInput.toLowerCase();
+      return SLASH_COMMANDS
+        .filter((c) => c.cmd.startsWith(q) || c.cmd.includes(q.slice(1)))
+        .map((c) => ({
+          id: c.cmd,
+          label: c.cmd,
+          sublabel: c.desc,
+          fillText: c.needsArg ? `${c.cmd} ` : c.cmd,
+          executeImmediately: !c.needsArg,
+        }));
+    }
+
+    const cmd = chatInput.slice(0, spaceIdx).toLowerCase();
+    const arg = chatInput.slice(spaceIdx + 1).trim().toLowerCase();
+
+    // Stage 2: Playlists for /playlist or /shuffle (sorted by most commonly played)
+    if (cmd === '/playlist' || cmd === '/shuffle') {
+      const sorted = [...playlists].sort((a, b) => (playlistHits[b.uri] || 0) - (playlistHits[a.uri] || 0));
+      const filtered = arg
+        ? sorted.filter((p) => p.name.toLowerCase().includes(arg))
+        : sorted;
+      return filtered.slice(0, 6).map((p) => ({
+        id: p.id,
+        label: p.name,
+        sublabel: `${p.tracks?.total ?? 0} songs${playlistHits[p.uri] ? ` • Played ${playlistHits[p.uri]}x` : ''}`,
+        fillText: `${cmd} ${p.name}`,
+        executeImmediately: true,
+        action: () => {
+          handlePlayPlaylist(p.uri, cmd === '/shuffle' ? true : undefined);
+          setMessages((prev) => [
+            ...prev,
+            { role: 'user', text: `${cmd} ${p.name}` },
+            { role: 'model', text: `${cmd === '/shuffle' ? 'Shuffle-playing' : 'Playing'} "${p.name}".` },
+          ]);
+          setChatInput('');
+          setSlashIdx(0);
+        },
+      }));
+    }
+
+    // Stage 2: Atmosphere vibes for /vibe
+    if (cmd === '/vibe') {
+      return VIBE_PRESETS
+        .filter((v) => !arg || v.name.toLowerCase().includes(arg))
+        .map((v) => ({
+          id: v.id,
+          label: v.name,
+          sublabel: v.desc,
+          fillText: `/vibe ${v.name}`,
+          executeImmediately: true,
+          action: () => {
+            applyVibePreset(v);
+            setMessages((prev) => [...prev, { role: 'user', text: `/vibe ${v.name}` }, { role: 'model', text: `Applied "${v.name}".` }]);
+            setChatInput('');
+            setSlashIdx(0);
+          },
+        }));
+    }
+
+    // Stage 2: Repeat modes for /repeat
+    if (cmd === '/repeat') {
+      return [
+        { id: 'off', label: 'off', sublabel: 'Repeat disabled', fillText: '/repeat off', executeImmediately: true },
+        { id: 'all', label: 'all', sublabel: 'Repeat entire playlist', fillText: '/repeat all', executeImmediately: true },
+        { id: 'track', label: 'track', sublabel: 'Repeat current song', fillText: '/repeat track', executeImmediately: true },
+      ].filter((r) => !arg || r.label.includes(arg));
+    }
+
+    return [];
+  }
+
+  const slashSuggestions = getSlashSuggestions();
+
+  function applySlashSuggestion(s: SlashSuggestion, runIfReady = false) {
+    if (runIfReady && s.executeImmediately) {
+      if (s.action) s.action();
+      else runSlashCommandText(s.fillText);
+    } else {
+      setChatInput(s.fillText);
+      setSlashIdx(0);
+      chatInputRef.current?.focus();
+    }
+  }
+
+  function handleChatKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
+    if (!chatInput.startsWith('/') || slashSuggestions.length === 0) return;
+    const safeIdx = Math.min(slashIdx, slashSuggestions.length - 1);
+    const active = slashSuggestions[safeIdx];
+
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      setSlashIdx((safeIdx + 1) % slashSuggestions.length);
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      setSlashIdx((safeIdx - 1 + slashSuggestions.length) % slashSuggestions.length);
+    } else if (e.key === 'Escape') {
+      e.preventDefault();
+      setChatInput('');
+      setSlashIdx(0);
+    } else if (e.key === 'Tab' && active) {
+      e.preventDefault();
+      applySlashSuggestion(active, false);
+    } else if (e.key === 'Enter' && active) {
+      e.preventDefault();
+      applySlashSuggestion(active, true);
+    }
+  }
+
   async function handleFormSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (!copilotEnabled || !chatInput.trim() || isAiLoading) return;
+    if (!chatInput.trim()) return;
+    if (chatInput.trim().startsWith('/') && runSlashCommandText(chatInput)) return;
+    if (!copilotEnabled || isAiLoading) return;
+
     const msg = chatInput.trim();
     setChatInput('');
     setMessages((prev) => [...prev, { role: 'user', text: msg }]);
     setIsAiLoading(true);
     try {
-      const response = await askGemini(msg, messages, playback);
+      const playlistCtx = playlists.slice(0, 25).map((p) => ({ name: p.name, uri: p.uri }));
+      const response = await askGemini(msg, messages, playback, playlistCtx);
       if (response.command) await executeCopilotCommand(response);
       setMessages((prev) => [...prev, { role: 'model', text: response.message }]);
     } catch (err: unknown) {
@@ -1574,12 +1863,41 @@ export default function HomePage() {
             )}
           </div>
 
-          <div className={`w-full mx-auto border rounded-2xl backdrop-blur-3xl flex flex-col justify-between p-3 shrink-0 shadow-lg h-36 md:h-40 max-w-3xl transition-all duration-300 z-10 ${theme.panel}`}>
-            {!copilotEnabled ? (
+          <div className={`relative w-full mx-auto border rounded-2xl backdrop-blur-3xl flex flex-col justify-between p-3 shrink-0 shadow-lg h-36 md:h-40 max-w-3xl transition-all duration-300 z-20 ${theme.panel}`}>
+            {slashSuggestions.length > 0 && (
+              <div className={`absolute bottom-full left-0 right-0 mb-2 rounded-2xl border shadow-2xl backdrop-blur-3xl overflow-hidden z-40 ${theme.modal}`}>
+                <div className="px-3 py-1.5 text-[10px] font-mono uppercase tracking-wider opacity-50 border-b border-inherit flex justify-between">
+                  <span>Commands & Suggestions</span>
+                  <span>↑↓ Navigate • Tab Fill • Enter Run</span>
+                </div>
+                <div className="max-h-48 overflow-y-auto p-1 space-y-0.5">
+                  {slashSuggestions.map((s, idx) => {
+                    const active = idx === Math.min(slashIdx, slashSuggestions.length - 1);
+                    return (
+                      <button
+                        key={s.id}
+                        type="button"
+                        onClick={() => applySlashSuggestion(s, true)}
+                        className={`w-full text-left px-3 py-1.5 rounded-xl text-xs flex items-center justify-between gap-2 transition-colors ${
+                          active ? 'bg-emerald-500/20 text-emerald-300' : 'hover:bg-white/10'
+                        }`}
+                      >
+                        <span className="font-bold truncate">{s.label}</span>
+                        <span className="text-[10px] opacity-60 truncate">{s.sublabel}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            {!copilotEnabled && !chatInput.startsWith('/') ? (
               <div className="h-full flex flex-col items-center justify-center text-center gap-2">
                 <Sparkles className="w-5 h-5 opacity-40" />
-                <p className="text-xs opacity-60">Copilot is disconnected.</p>
-                <button onClick={() => toggleCopilot(true)} className={`px-3.5 py-1.5 rounded-xl text-xs font-bold ${theme.accentBtn}`}>Reconnect Copilot</button>
+                <p className="text-xs opacity-60">Copilot is disconnected (slash commands like /playlist still work).</p>
+                <div className="flex items-center gap-2">
+                  <button onClick={() => toggleCopilot(true)} className={`px-3.5 py-1.5 rounded-xl text-xs font-bold ${theme.accentBtn}`}>Reconnect Copilot</button>
+                </div>
               </div>
             ) : (
               <>
@@ -1593,7 +1911,15 @@ export default function HomePage() {
                   <div ref={chatBottomRef} />
                 </div>
                 <form onSubmit={handleFormSubmit} className="flex gap-2 pt-2">
-                  <input type="text" value={chatInput} onChange={(e) => setChatInput(e.target.value)} placeholder="Ask music trivia, say 'play Silly Watch by Lil Uzi Vert', or 'unpause'..." className={`flex-1 border rounded-xl px-3.5 py-2 text-xs focus:outline-none transition-colors ${theme.input}`} />
+                  <input
+                    ref={chatInputRef}
+                    type="text"
+                    value={chatInput}
+                    onChange={(e) => { setChatInput(e.target.value); setSlashIdx(0); }}
+                    onKeyDown={handleChatKeyDown}
+                    placeholder="Type / for commands (/playlist, /shuffle, /vibe) or ask Copilot..."
+                    className={`flex-1 border rounded-xl px-3.5 py-2 text-xs focus:outline-none transition-colors ${theme.input}`}
+                  />
                   <button type="submit" disabled={isAiLoading || !chatInput.trim()} className={`p-2 rounded-xl transition-all disabled:opacity-40 ${theme.accentBtn}`}><Send className="w-3.5 h-3.5" /></button>
                 </form>
               </>
