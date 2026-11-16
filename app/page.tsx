@@ -931,29 +931,37 @@ export default function HomePage() {
       const target = found.find((d) => d.id === activeDeviceId.current) || found[0];
       activeDeviceId.current = target.id;
       if (forceTransfer || settings.autoWakeDevice) {
-        await callSpotify('/me/player', 'PUT', {
-          device_ids: [target.id],
-          play: autoPlayOnTransfer,
-        }, true);
-        setStatusBanner(`Waking up ${target.name}...`);
+        const wakeRes = await callSpotify(
+          '/me/player',
+          'PUT',
+          { device_ids: [target.id], play: autoPlayOnTransfer },
+          true
+        );
+        if (wakeRes.ok) {
+          setStatusBanner(`Waking up ${target.name}...`);
+          return target.id;
+        }
+      } else {
+        return target.id;
       }
-      return target.id;
     }
 
-    // Mobile OS often hides paused devices from /devices — try waking last known ID directly once
     if (activeDeviceId.current) {
-      const wakeRes = await callSpotify('/me/player', 'PUT', {
-        device_ids: [activeDeviceId.current],
-        play: autoPlayOnTransfer,
-      }, true);
-      if (wakeRes.ok) {
-        return activeDeviceId.current;
-      }
+      const wakeRes = await callSpotify(
+        '/me/player',
+        'PUT',
+        { device_ids: [activeDeviceId.current], play: autoPlayOnTransfer },
+        true
+      );
+      if (wakeRes.ok) return activeDeviceId.current;
+
+      setStatusBanner(
+        `Spotify couldn't wake device (${wakeRes.status}: ${wakeRes.errorMessage || 'Device asleep'}). Open Spotify on your phone once.`
+      );
+      return null;
     }
 
-    setStatusBanner(
-      'Spotify went to sleep after pausing (iOS/Android suspends background audio). Open Spotify on your phone once to wake it.'
-    );
+    setStatusBanner('No active Spotify device found. Open Spotify on your phone or PC once.');
     return null;
   }
 
@@ -962,27 +970,48 @@ export default function HomePage() {
     activeDeviceId.current = devId;
     await callSpotify('/me/player', 'PUT', { device_ids: [devId], play: true });
     setShowDevicesModal(false);
-    setTimeout(() => { isActionPending.current = false; fetchNowPlaying(); loadDevices(); }, 800);
+    setTimeout(() => {
+      isActionPending.current = false;
+      fetchNowPlaying();
+      loadDevices();
+    }, 800);
   }
 
   async function togglePlay() {
-    if (!isAuthenticated) { window.location.href = '/api/auth/login'; return; }
+    if (!isAuthenticated) {
+      window.location.href = '/api/auth/login';
+      return;
+    }
     if (!playback) {
       const wokeId = await ensureActiveDeviceOrWake(true, true);
       if (wokeId) setTimeout(fetchNowPlaying, 800);
       return;
     }
+
     const targetState = !playback.isPlaying;
     const devParam = activeDeviceId.current ? `?device_id=${activeDeviceId.current}` : '';
     isActionPending.current = true;
-    setPlayback((prev) => (prev ? { ...prev, isPlaying: targetState, lastSyncTime: Date.now() } : null));
+    setPlayback((prev) =>
+      prev ? { ...prev, isPlaying: targetState, lastSyncTime: Date.now() } : null
+    );
 
-    const res = await callSpotify(`/me/player/${targetState ? 'play' : 'pause'}${devParam}`, 'PUT');
-    if (!res.ok && targetState && (res.status === 404 || res.status === 403)) {
-      const wokeId = await ensureActiveDeviceOrWake(true, true);
-      if (wokeId) await callSpotify(`/me/player/play?device_id=${wokeId}`, 'PUT');
+    let res = await callSpotify(
+      `/me/player/${targetState ? 'play' : 'pause'}${devParam}`,
+      'PUT',
+      undefined,
+      true
+    );
+    if (!res.ok && targetState && devParam) {
+      res = await callSpotify('/me/player/play', 'PUT', undefined, true);
     }
-    setTimeout(() => { isActionPending.current = false; fetchNowPlaying(); }, 550);
+    if (!res.ok && targetState && (res.status === 404 || res.status === 403)) {
+      await ensureActiveDeviceOrWake(true, true);
+    }
+
+    setTimeout(() => {
+      isActionPending.current = false;
+      fetchNowPlaying();
+    }, 550);
   }
 
   async function toggleShuffle(forceState?: boolean) {
@@ -1181,10 +1210,12 @@ export default function HomePage() {
             }
           }
         } else {
-          const resumeRes = await callSpotify(`/me/player/play${devParam}`, 'PUT');
+          let resumeRes = await callSpotify(`/me/player/play${devParam}`, 'PUT', undefined, true);
+          if (!resumeRes.ok && devParam) {
+            resumeRes = await callSpotify('/me/player/play', 'PUT', undefined, true);
+          }
           if (!resumeRes.ok && (resumeRes.status === 404 || resumeRes.status === 403)) {
-            const wokeId = await ensureActiveDeviceOrWake(true, true);
-            if (wokeId) await callSpotify(`/me/player/play?device_id=${wokeId}`, 'PUT');
+            await ensureActiveDeviceOrWake(true, true);
           }
         }
       }
