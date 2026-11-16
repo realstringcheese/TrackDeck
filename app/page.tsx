@@ -611,35 +611,6 @@ export default function HomePage() {
       window.history.replaceState({}, '', '/');
     }
 
-  useEffect(() => {
-    if (leftTab !== 'search' || !isAuthenticated) return;
-    const q = searchQuery.trim();
-    if (!q) {
-      setSearchResults([]);
-      return;
-    }
-    let cancelled = false;
-    const timer = setTimeout(async () => {
-      setIsSearching(true);
-      const res = await callSpotify<{ tracks?: { items?: TrackItem[] } }>(
-        `/search?q=${encodeURIComponent(q)}&type=track&limit=10`,
-        'GET',
-        undefined,
-        true
-      );
-      if (!cancelled) {
-        if (res.ok && Array.isArray(res.data?.tracks?.items)) {
-          setSearchResults(res.data.tracks.items.filter(Boolean));
-        }
-        setIsSearching(false);
-      }
-    }, 350);
-    return () => {
-      cancelled = true;
-      clearTimeout(timer);
-    };
-  }, [searchQuery, leftTab, isAuthenticated, callSpotify]);
-
     const savedLayout = localStorage.getItem('trackdeck_layout') as LayoutPreset;
     if (savedLayout === 'studio' || savedLayout === 'cinema') setLayout(savedLayout);
 
@@ -691,6 +662,35 @@ export default function HomePage() {
       }
     })();
   }, [callSpotify, fetchNowPlaying, loadDevices, loadPlaylists, loadQueue]);
+
+  useEffect(() => {
+    if (leftTab !== 'search' || !isAuthenticated) return;
+    const q = searchQuery.trim();
+    if (!q) {
+      setSearchResults([]);
+      return;
+    }
+    let cancelled = false;
+    const timer = setTimeout(async () => {
+      setIsSearching(true);
+      const res = await callSpotify<{ tracks?: { items?: TrackItem[] } }>(
+        `/search?q=${encodeURIComponent(q)}&type=track&limit=10`,
+        'GET',
+        undefined,
+        true
+      );
+      if (!cancelled) {
+        if (res.ok && Array.isArray(res.data?.tracks?.items)) {
+          setSearchResults(res.data.tracks.items.filter(Boolean));
+        }
+        setIsSearching(false);
+      }
+    }, 350);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [searchQuery, leftTab, isAuthenticated, callSpotify]);
 
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
