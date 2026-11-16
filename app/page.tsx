@@ -326,6 +326,30 @@ function GeminiKeyCard({
   );
 }
 
+function proxyImg(url?: string): string {
+  if (!url) return '';
+  if (url.startsWith('data:') || url.startsWith('/')) return url;
+  try {
+    const h = new URL(url).hostname;
+    if (
+      h === 'scdn.co' ||
+      h.endsWith('.scdn.co') ||
+      h.endsWith('.spotifycdn.com') ||
+      h === 'images.unsplash.com'
+    ) {
+      return `/api/img?url=${encodeURIComponent(url)}`;
+    }
+  } catch {}
+  return url;
+}
+
+function pickThumb(images?: { url: string }[]): string {
+  if (!images || images.length === 0) return '';
+  // Use smallest thumbnail (~64x64) for tiny list rows instead of full 640x640
+  const url = images[images.length - 1]?.url || images[0]?.url || '';
+  return proxyImg(url);
+}
+
 function getSongCoverKey(pb: Pick<PlaybackState, 'name' | 'artist'>) {
   return `${pb.name.toLowerCase().trim()}::${pb.artist.toLowerCase().trim()}`;
 }
@@ -1526,11 +1550,16 @@ export default function HomePage() {
   }
 
   const savedCustomSongCover = playback ? songCovers[getSongCoverKey(playback)] || '' : '';
-  const resolvedAlbumArt = playback?.albumArt || savedCustomSongCover;
+  const resolvedAlbumArt = proxyImg(playback?.albumArt) || savedCustomSongCover;
   const hasSavedCustomCover = Boolean(playback && !playback.albumArt && savedCustomSongCover);
   const progressPercent = playback ? Math.min(100, Math.max(0, (playback.progressMs / playback.durationMs) * 100)) : 0;
   const theme = THEME_CLASSES[colorTheme];
-  const activeBgImage = bgMode === 'custom' && bgCustomUrl ? bgCustomUrl : bgMode === 'gallery' ? selectedGalleryUrl : resolvedAlbumArt || '';
+  const activeBgImage =
+    bgMode === 'custom' && bgCustomUrl
+      ? bgCustomUrl
+      : bgMode === 'gallery'
+      ? proxyImg(selectedGalleryUrl)
+      : resolvedAlbumArt || '';
 
   // ==========================================================================
   // SECTION 10: MAIN JSX RENDER
@@ -1830,7 +1859,7 @@ export default function HomePage() {
                       title="Click to play"
                     >
                       {track.album?.images?.[0]?.url ? (
-                        <img src={track.album.images[0].url} alt={track.name} className="w-10 h-10 rounded-lg object-cover shadow-sm shrink-0" />
+                       <img src={pickThumb(track.album.images)} loading="lazy" alt={track.name} className="w-10 h-10 rounded-lg object-cover shadow-sm shrink-0" />
                       ) : (
                         <div className="w-10 h-10 rounded-lg bg-white/5 border border-white/10 flex items-center justify-center shrink-0"><Music2 className="w-4 h-4 opacity-50" /></div>
                       )}
@@ -1859,7 +1888,7 @@ export default function HomePage() {
                 <div className="space-y-3">
                   <div className="text-center p-2">
                     {selectedPlaylist.images?.[0]?.url ? (
-                      <img src={selectedPlaylist.images[0].url} alt={selectedPlaylist.name} className="w-28 h-28 mx-auto rounded-2xl shadow-lg object-cover mb-2" />
+                     <img src={proxyImg(selectedPlaylist.images[0].url)} alt={selectedPlaylist.name} className="w-28 h-28 mx-auto rounded-2xl shadow-lg object-cover mb-2" />
                     ) : (
                       <div className="w-28 h-28 mx-auto rounded-2xl bg-white/5 border border-white/10 flex items-center justify-center mb-2"><Music2 className="w-8 h-8 opacity-40" /></div>
                     )}
@@ -1900,7 +1929,7 @@ export default function HomePage() {
               ) : (
                 playlists.map((pl) => (
                   <div key={pl.id} onClick={() => openPlaylistInspector(pl)} className="group rounded-xl cursor-pointer hover:bg-white/10 transition-all flex items-center gap-3 p-2">
-                    {pl.images?.[0]?.url ? <img src={pl.images[0].url} alt={pl.name} className="w-10 h-10 rounded-lg object-cover shadow-sm shrink-0" /> : <div className="w-10 h-10 rounded-lg bg-white/5 border border-white/10 flex items-center justify-center shrink-0"><Music2 className="w-4 h-4 opacity-50" /></div>}
+                    {pl.images?.[0]?.url ? <img src={pickThumb(pl.images)} loading="lazy" alt={pl.name} className="w-10 h-10 rounded-lg object-cover shadow-sm shrink-0" /> : <div className="w-10 h-10 rounded-lg bg-white/5 border border-white/10 flex items-center justify-center shrink-0"><Music2 className="w-4 h-4 opacity-50" /></div>}
                     <div className="truncate flex-1">
                       <p className={`text-xs font-semibold truncate transition-colors ${theme.hoverAccentText}`}>{pl.name}</p>
                       <p className="text-[10px] opacity-60">{pl.items?.total ?? pl.tracks?.total ?? 0} songs</p>
@@ -2119,7 +2148,7 @@ export default function HomePage() {
               ) : (
                 queue.map((track, idx) => (
                   <div key={`${track.id || idx}-${idx}`} onClick={() => track.uri && handlePlayTrack(track.uri)} className="group rounded-xl cursor-pointer hover:bg-white/10 transition-all flex items-center gap-3 p-2" title={`${track.name} - ${track.artists?.map((a) => a.name).join(', ')}`}>
-                    {track.album?.images?.[0]?.url ? <img src={track.album.images[0].url} alt={track.name} className="w-10 h-10 rounded-lg object-cover shadow-sm shrink-0" /> : <div className="w-10 h-10 rounded-lg bg-white/5 border border-white/10 flex items-center justify-center shrink-0"><Music2 className="w-4 h-4 opacity-50" /></div>}
+                    <img src={pickThumb(track.album.images)} loading="lazy" alt={track.name} className="w-10 h-10 rounded-lg object-cover shadow-sm shrink-0" />
                     <div className="truncate flex-1">
                       <p className={`text-xs font-semibold truncate transition-colors ${theme.hoverAccentText}`}>{track.name}</p>
                       <p className="text-[10px] opacity-60 truncate">{track.artists?.map((a) => a.name).join(', ')}</p>
